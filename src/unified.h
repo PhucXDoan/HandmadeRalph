@@ -553,6 +553,25 @@ internal constexpr vi3    vx3(const i32& a) { return { a, a, a    }; }
 internal constexpr vf4    vx4(const f32& a) { return { a, a, a, a }; }
 internal constexpr vi4    vx4(const i32& a) { return { a, a, a, a }; }
 
+#define VXX_COLOR_F3_(C0, C1, C2)     (static_cast<u32>(static_cast<u8>(MACRO_CONCAT_(v., C0) * 255.0f) << 16) | static_cast<u32>(static_cast<u8>(MACRO_CONCAT_(v., C1) * 255.0f) <<  8) | static_cast<u32>(static_cast<u8>(MACRO_CONCAT_(v., C2) * 255.0f) << 0))
+#define VXX_COLOR_F4_(C0, C1, C2, C3) (static_cast<u32>(static_cast<u8>(MACRO_CONCAT_(v., C0) * 255.0f) << 24) | static_cast<u32>(static_cast<u8>(MACRO_CONCAT_(v., C1) * 255.0f) << 16) | static_cast<u32>(static_cast<u8>(MACRO_CONCAT_(v., C2) * 255.0f) << 8) | static_cast<u32>(static_cast<u8>(MACRO_CONCAT_(v., C3) * 255.0f) << 0))
+#define VXX_COLOR_I3_(C0, C1, C2)     (static_cast<u32>(static_cast<u8>(MACRO_CONCAT_(v., C0)) << 16) | static_cast<u32>(static_cast<u8>(MACRO_CONCAT_(v., C1)) <<  8) | static_cast<u32>(static_cast<u8>(MACRO_CONCAT_(v., C2)) << 0))
+#define VXX_COLOR_I4_(C0, C1, C2, C3) (static_cast<u32>(static_cast<u8>(MACRO_CONCAT_(v., C0)) << 24) | static_cast<u32>(static_cast<u8>(MACRO_CONCAT_(v., C1)) << 16) | static_cast<u32>(static_cast<u8>(MACRO_CONCAT_(v., C2)) << 8) | static_cast<u32>(static_cast<u8>(MACRO_CONCAT_(v., C3)) << 0))
+
+internal constexpr u32 vxx_argb(const vf3& v) { return VXX_COLOR_F3_(   x, y, z); };
+internal constexpr u32 vxx_argb(const vf4& v) { return VXX_COLOR_F4_(w, x, y, z); };
+internal constexpr u32 vxx_argb(const vi3& v) { return VXX_COLOR_I3_(   x, y, z); };
+internal constexpr u32 vxx_argb(const vi4& v) { return VXX_COLOR_I4_(w, x, y, z); };
+internal constexpr u32 vxx_rgba(const vf3& v) { return VXX_COLOR_F3_(x, y, z   ); };
+internal constexpr u32 vxx_rgba(const vf4& v) { return VXX_COLOR_F4_(x, y, z, w); };
+internal constexpr u32 vxx_rgba(const vi3& v) { return VXX_COLOR_I3_(x, y, z   ); };
+internal constexpr u32 vxx_rgba(const vi4& v) { return VXX_COLOR_I4_(x, y, z, w); };
+
+#undef VXX_COLOR_F3_
+#undef VXX_COLOR_F4_
+#undef VXX_COLOR_I3_
+#undef VXX_COLOR_I4_
+
 template <typename TYPE>
 i32 sign(const TYPE& x)
 {

@@ -2,8 +2,8 @@
 setlocal ENABLEDELAYEDEXPANSION
 
 set DEBUG=1
-set WARNINGS=/W4 /Wall /wd4201 /wd5219 /wd4668
-set DEBUG_WARNINGS=%WARNINGS% /wd4505 /wd4100 /wd4101 /wd4514 /wd4189
+set WARNINGS=/W4 /Wall /wd4201 /wd5219 /wd4668 /wd5045
+set DEBUG_WARNINGS=%WARNINGS% /wd4505 /wd4100 /wd4101 /wd4514 /wd4189 /wd4191
 set LIBRARIES=user32.lib gdi32.lib
 
 IF NOT EXIST W:\build\ (
@@ -22,11 +22,13 @@ popd
 REM C4201       : "nonstandard extension used : nameless struct/union"
 REM C5219       : "implicit conversion from 'type-1' to 'type-2', possible loss of data"
 REM C4668       : "'symbol' is not defined as a preprocessor macro, replacing with '0' for 'directives'"
+REM C5045       : "Compiler will insert Spectre mitigation for memory load if /Qspectre switch specified"
 REM C4505       : "'function' : unreferenced local function has been removed"
 REM C4100       : "'identifier' : unreferenced formal parameter"
 REM C4101       : "'identifier' : unreferenced local variable"
 REM C4514       : "'function' : unreferenced inline function has been removed"
 REM C4189       : "'identifier' : local variable is initialized but not referenced"
+REM C4191       : "'operator/operation' : unsafe conversion from 'type of expression' to 'type required'"
 REM /Z7         : "The /Z7 option produces object files that also contain full symbolic debugging information for use with the debugger."
 REM /MTd        : "Defines _DEBUG and _MT. This option also causes the compiler to place the library name LIBCMTD.lib into the .obj file so that the linker will use LIBCMTD.lib to resolve external symbols."
 REM /GR         : "Adds code to check object types at run time."
