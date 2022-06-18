@@ -1,10 +1,11 @@
 #undef UNICODE
 #define UNICODE true
 #pragma warning(push)
-#pragma warning(disable : 5039)
+#pragma warning(disable : 5039 4820)
 #include <windows.h>
-#pragma warning(pop)
 #include <xinput.h>
+#include <dsound.h>
+#pragma warning(pop)
 #include "unified.h"
 
 #define  XInputGetState_t(NAME) DWORD NAME(DWORD dwUserIndex, XINPUT_STATE *pState)
@@ -12,11 +13,10 @@ typedef  XInputGetState_t(XInputGetState_t);
 internal XInputGetState_t(stub_XInputGetState) { return ERROR_DEVICE_NOT_CONNECTED; }
 global   XInputGetState_t* g_XInputGetState = stub_XInputGetState;
 
-global constexpr vi2 BACKBUFFER_DIMENSIONS = { 1280, 720 };
+#define  DirectSoundCreate_t(NAME) HRESULT WINAPI NAME(LPGUID lpGuid, LPDIRECTSOUND* ppDS, LPUNKNOWN pUnkOuter)
+typedef  DirectSoundCreate_t(DirectSoundCreate_t);
 
-global vi2        g_client_dimensions      = { 0, 0 };
-global BITMAPINFO g_backbuffer_bitmap_info = {};
-global byte*      g_backbuffer_bitmap_data = 0;
+global vi2 g_client_dimensions = { 0, 0 };
 
 internal LRESULT window_procedure_callback(HWND window, UINT message, WPARAM wparam, LPARAM lparam)
 {
@@ -44,22 +44,7 @@ internal LRESULT window_procedure_callback(HWND window, UINT message, WPARAM wpa
 		{
 			RECT client_rect;
 			GetClientRect(window, &client_rect);
-
 			g_client_dimensions = { client_rect.right - client_rect.left, client_rect.bottom - client_rect.top };
-
-			// @NOTE@ Resizes framebuffer to fit the new client dimensions.
-			#if 0
-			g_backbuffer_bitmap_info.bmiHeader.biWidth  =  g_client_dimensions.x;
-			g_backbuffer_bitmap_info.bmiHeader.biHeight = -g_client_dimensions.y;
-
-			if (g_backbuffer_bitmap_data)
-			{
-				VirtualFree(g_backbuffer_bitmap_data, 0, MEM_RELEASE);
-			}
-
-			g_backbuffer_bitmap_data = reinterpret_cast<byte*>(VirtualAlloc(0, static_cast<size_t>(4) * g_backbuffer_bitmap_info.bmiHeader.biWidth * -g_backbuffer_bitmap_info.bmiHeader.biHeight, MEM_COMMIT, PAGE_READWRITE));
-			#endif
-
 			return 0;
 		} break;
 
@@ -120,14 +105,9 @@ internal LRESULT window_procedure_callback(HWND window, UINT message, WPARAM wpa
 
 int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int cmd_show)
 {
-	g_backbuffer_bitmap_info.bmiHeader.biSize        = sizeof(g_backbuffer_bitmap_info.bmiHeader);
-	g_backbuffer_bitmap_info.bmiHeader.biPlanes      = 1;
-	g_backbuffer_bitmap_info.bmiHeader.biBitCount    = 32;
-	g_backbuffer_bitmap_info.bmiHeader.biCompression = BI_RGB;
-
-	g_backbuffer_bitmap_info.bmiHeader.biWidth  =  BACKBUFFER_DIMENSIONS.x;
-	g_backbuffer_bitmap_info.bmiHeader.biHeight = -BACKBUFFER_DIMENSIONS.y;
-	g_backbuffer_bitmap_data = reinterpret_cast<byte*>(VirtualAlloc(0, static_cast<size_t>(4) * g_backbuffer_bitmap_info.bmiHeader.biWidth * -g_backbuffer_bitmap_info.bmiHeader.biHeight, MEM_COMMIT, PAGE_READWRITE));
+	//
+	// Initialize window.
+	//
 
 	constexpr wchar_t CLASS_NAME[] = L"HandemadeRalphWindowClass";
 
@@ -153,27 +133,113 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int cmd_show)
 		return -1;
 	}
 
+	//
+	// Initialize XInput.
+	//
+
 	{
 		HMODULE xinput_dll = LoadLibraryW(L"xinput1_4.dll");
 		if (!xinput_dll)
 		{
-			DEBUG_printf("Could not load `xinput1_4.dll`.\n");
+			DEBUG_printf("XInput:: Could not load `xinput1_4.dll`.\n");
 			xinput_dll = LoadLibraryW(L"xinput1_3.dll");
 			if (!xinput_dll)
 			{
-				DEBUG_printf("Could not load `xinput1_3.dll`.\n");
+				DEBUG_printf("XInput:: Could not load `xinput1_3.dll`.\n");
 			}
 		}
 		if (xinput_dll)
 		{
 			g_XInputGetState = reinterpret_cast<XInputGetState_t*>(GetProcAddress(xinput_dll, "XInputGetState"));
-			if (!g_XInputGetState)
-			{
-				DEBUG_printf("Could not load `XInputGetState`.\n");
-				g_XInputGetState = stub_XInputGetState;
-			}
+			ASSERT(g_XInputGetState);
 		}
 	}
+
+	//
+	// Initialize DirectSound.
+	//
+
+	{
+		HMODULE directsound_dll = LoadLibraryW(L"dsound.dll");
+		if (!directsound_dll)
+		{
+			DEBUG_printf("DirectSound :: Could not load `dsound.dll`.\n");
+			return -1;
+		}
+
+		DirectSoundCreate_t* l_DirectSoundCreate = reinterpret_cast<DirectSoundCreate_t*>(GetProcAddress(directsound_dll, "DirectSoundCreate"));
+		ASSERT(l_DirectSoundCreate);
+
+		IDirectSound* directsound;
+		if (l_DirectSoundCreate(0, &directsound, 0) != DS_OK)
+		{
+			DEBUG_printf("DirectSound :: Could not create object.\n");
+			return -1;
+		}
+
+		if (directsound->SetCooperativeLevel(window, DSSCL_PRIORITY) != DS_OK)
+		{
+			DEBUG_printf("DirectSound :: Could not set a cooperative level.\n");
+			return -1;
+		}
+
+		DSBUFFERDESC primary_buffer_description = {};
+		primary_buffer_description.dwSize  = sizeof(primary_buffer_description);
+		primary_buffer_description.dwFlags = DSBCAPS_PRIMARYBUFFER;
+		IDirectSoundBuffer* primary_buffer;
+		if (directsound->CreateSoundBuffer(&primary_buffer_description, &primary_buffer, 0) != DS_OK)
+		{
+			DEBUG_printf("DirectSound :: Could not create primary buffer.\n");
+			return -1;
+		}
+
+		constexpr i32 SAMPLES_PER_SECOND = 48000;
+
+		WAVEFORMATEX primary_buffer_format = {};
+		primary_buffer_format.wFormatTag      = WAVE_FORMAT_PCM;
+		primary_buffer_format.nChannels       = 2;
+		primary_buffer_format.nSamplesPerSec  = SAMPLES_PER_SECOND;
+		primary_buffer_format.wBitsPerSample  = 16;
+		primary_buffer_format.nBlockAlign     = static_cast<WORD>(primary_buffer_format.nChannels * primary_buffer_format.wBitsPerSample / 8);
+		primary_buffer_format.nAvgBytesPerSec = primary_buffer_format.nSamplesPerSec * primary_buffer_format.nBlockAlign;
+		if (primary_buffer->SetFormat(&primary_buffer_format) != DS_OK)
+		{
+			DEBUG_printf("DirectSound :: Could not set format of primary buffer.\n");
+			return -1;
+		}
+
+		constexpr memsize SOUND_BUFFER_SIZE = 2 * SAMPLES_PER_SECOND * sizeof(i16);
+
+		DSBUFFERDESC secondary_buffer_description = {};
+		secondary_buffer_description.dwSize        = sizeof(secondary_buffer_description);
+		secondary_buffer_description.dwBufferBytes = SOUND_BUFFER_SIZE;
+		secondary_buffer_description.lpwfxFormat   = &primary_buffer_format;
+		IDirectSoundBuffer* secondary_buffer;
+		if (directsound->CreateSoundBuffer(&secondary_buffer_description, &secondary_buffer, 0) != DS_OK)
+		{
+			DEBUG_printf("DirectSound :: Could not create secondary buffer.\n");
+			return -1;
+		}
+	}
+
+	//
+	// Loop.
+	//
+
+	constexpr BITMAPINFO BACKBUFFER_BITMAP_INFO =
+		{
+			.bmiHeader =
+				{
+					.biSize        = sizeof(BACKBUFFER_BITMAP_INFO.bmiHeader),
+					.biWidth       =  1080,
+					.biHeight      = -720,
+					.biPlanes      = 1,
+					.biBitCount    = 32,
+					.biCompression = BI_RGB
+				}
+		};
+
+	byte* backbuffer_bitmap_data = reinterpret_cast<byte*>(VirtualAlloc(0, static_cast<size_t>(4) * BACKBUFFER_BITMAP_INFO.bmiHeader.biWidth * -BACKBUFFER_BITMAP_INFO.bmiHeader.biHeight, MEM_COMMIT, PAGE_READWRITE));
 
 	while (true)
 	{
@@ -192,6 +258,7 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int cmd_show)
 		DEBUG_persist offset_x = 0;
 		DEBUG_persist offset_y = 0;
 
+		// @TODO@ Casey said the polls on unactive controllers can cause a massive stall.
 		FOR_RANGE(i, XUSER_MAX_COUNT)
 		{
 			XINPUT_STATE gamepad_state;
@@ -224,11 +291,11 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int cmd_show)
 			}
 		}
 
-		FOR_RANGE(y, -g_backbuffer_bitmap_info.bmiHeader.biHeight)
+		FOR_RANGE(y, -BACKBUFFER_BITMAP_INFO.bmiHeader.biHeight)
 		{
-			FOR_RANGE(x, g_backbuffer_bitmap_info.bmiHeader.biWidth)
+			FOR_RANGE(x, BACKBUFFER_BITMAP_INFO.bmiHeader.biWidth)
 			{
-				reinterpret_cast<u32*>(g_backbuffer_bitmap_data)[y * g_backbuffer_bitmap_info.bmiHeader.biWidth + x] =
+				reinterpret_cast<u32*>(backbuffer_bitmap_data)[y * BACKBUFFER_BITMAP_INFO.bmiHeader.biWidth + x] =
 					vxx_argb(vi3 { offset_x + x, offset_y + y, offset_x + offset_y + x + y });
 			}
 		}
@@ -245,10 +312,10 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int cmd_show)
 			g_client_dimensions.y,
 			0,
 			0,
-			g_backbuffer_bitmap_info.bmiHeader.biWidth,
-			-g_backbuffer_bitmap_info.bmiHeader.biHeight,
-			g_backbuffer_bitmap_data,
-			&g_backbuffer_bitmap_info,
+			BACKBUFFER_BITMAP_INFO.bmiHeader.biWidth,
+			-BACKBUFFER_BITMAP_INFO.bmiHeader.biHeight,
+			backbuffer_bitmap_data,
+			&BACKBUFFER_BITMAP_INFO,
 			DIB_RGB_COLORS,
 			SRCCOPY
 		);
