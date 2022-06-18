@@ -20,7 +20,6 @@ typedef float       f32;
 typedef double      f64;
 
 #define internal static
-#define persist  static
 #define global   static
 #define aliasing auto&
 #define lambda   const auto
@@ -88,6 +87,8 @@ typedef double      f64;
 	#undef min
 	#undef max
 
+	#define DEBUG_persist static
+
 	#define ASSERT(EXPRESSION) do { if (!(EXPRESSION)) { *((i32*)(0)) = 0; } } while (false)
 
 	#define DEBUG_printf(FSTR, ...)\
@@ -100,19 +101,19 @@ typedef double      f64;
 	while (false)
 
 	#define DEBUG_once\
-	for (persist bool32 MACRO_CONCAT_(DEBUG_ONCE_, __LINE__) = true; MACRO_CONCAT_(DEBUG_ONCE_, __LINE__); MACRO_CONCAT_(DEBUG_ONCE_, __LINE__) = false)
+	for (DEBUG_persist bool32 MACRO_CONCAT_(DEBUG_ONCE_, __LINE__) = true; MACRO_CONCAT_(DEBUG_ONCE_, __LINE__); MACRO_CONCAT_(DEBUG_ONCE_, __LINE__) = false)
 
 	#define DEBUG_PROFILER_create_group(GROUP_NAME, ...)\
 	enum struct GROUP_NAME : u8 { __VA_ARGS__, CAPACITY };\
-	constexpr strlit        MACRO_CONCAT_(GROUP_NAME, _STRS)[GROUP_NAME::CAPACITY] = { MACRO_STRINGIFY_ARGS_(__VA_ARGS__) };\
-	persist   LARGE_INTEGER MACRO_CONCAT_(GROUP_NAME, _LI_0)[GROUP_NAME::CAPACITY] = {};\
-	persist   LARGE_INTEGER MACRO_CONCAT_(GROUP_NAME, _LI_1)[GROUP_NAME::CAPACITY] = {};\
-	persist   u64           MACRO_CONCAT_(GROUP_NAME, _DATA)[GROUP_NAME::CAPACITY] = {}
+	constexpr     strlit        MACRO_CONCAT_(GROUP_NAME, _STRS)[GROUP_NAME::CAPACITY] = { MACRO_STRINGIFY_ARGS_(__VA_ARGS__) };\
+	DEBUG_persist LARGE_INTEGER MACRO_CONCAT_(GROUP_NAME, _LI_0)[GROUP_NAME::CAPACITY] = {};\
+	DEBUG_persist LARGE_INTEGER MACRO_CONCAT_(GROUP_NAME, _LI_1)[GROUP_NAME::CAPACITY] = {};\
+	DEBUG_persist u64           MACRO_CONCAT_(GROUP_NAME, _DATA)[GROUP_NAME::CAPACITY] = {}
 
 	#define DEBUG_PROFILER_flush_group(GROUP_NAME, COUNT, GOAL)\
 	do\
 	{\
-		if (persist u64 MACRO_CONCAT_(GROUP_NAME, _COUNTER) = 0; ++MACRO_CONCAT_(GROUP_NAME, _COUNTER) >= (COUNT))\
+		if (DEBUG_persist u64 MACRO_CONCAT_(GROUP_NAME, _COUNTER) = 0; ++MACRO_CONCAT_(GROUP_NAME, _COUNTER) >= (COUNT))\
 		{\
 			MACRO_CONCAT_(GROUP_NAME, _COUNTER) = 0;\
 			u64           MACRO_CONCAT_(GROUP_NAME, _TOTAL) = 0;\

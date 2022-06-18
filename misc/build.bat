@@ -4,7 +4,7 @@ setlocal ENABLEDELAYEDEXPANSION
 set DEBUG=1
 set WARNINGS=/W4 /Wall /wd4201 /wd5219 /wd4668
 set DEBUG_WARNINGS=%WARNINGS% /wd4505 /wd4100 /wd4101 /wd4514
-set LIBRARIES=
+set LIBRARIES=user32.lib gdi32.lib
 
 IF NOT EXIST W:\build\ (
 	mkdir W:\build\
@@ -13,10 +13,9 @@ IF NOT EXIST W:\build\ (
 pushd W:\build\
 	if %DEBUG% equ 0 (
 		echo Release build
-		cl /nologo /DDATA_DIR="\"W:/data/\"" /DEXE_DIR="\"W:/build/\"" /DSRC_DIR="\"W:/src/\"" /std:c++17 /Od /Z7 /MTd /GR- /EHsc /EHa- /permissive- /Femain.exe W:\src\main.cpp /link %LIBRARIES% /opt:ref /incremental:no
 	) else (
 		echo Debug build
-		cl /nologo /DDATA_DIR="\"W:/data/\"" /DEXE_DIR="\"W:/build/\"" /DSRC_DIR="\"W:/src/\"" /std:c++17 /Od /DDEBUG=1 /Z7 /MTd /GR- /EHsc /EHa- %DEBUG_WARNINGS% /permissive- /Femain.exe W:\src\main.cpp /link %LIBRARIES% /DEBUG:FULL /opt:ref /incremental:no
+		cl /nologo /DDATA_DIR="\"W:/data/\"" /DEXE_DIR="\"W:/build/\"" /DSRC_DIR="\"W:/src/\"" /std:c++17 /Od /DDEBUG=1 /Z7 /MTd /GR- /EHsc /EHa- %DEBUG_WARNINGS% /permissive- /FeHandmadeRalph.exe W:\src\HandmadeRalph_win32.cpp /link /subsystem:windows %LIBRARIES% /DEBUG:FULL /opt:ref /incremental:no
 	)
 popd
 
