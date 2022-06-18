@@ -6,6 +6,9 @@
 #pragma warning(pop)
 #include "unified.h"
 
+global BITMAPINFO g_backbuffer_bitmap_info = {};
+global byte*      g_backbuffer_bitmap_data = 0;
+
 internal LRESULT window_procedure_callback(HWND window, UINT message, WPARAM wparam, LPARAM lparam)
 {
 	switch (message)
@@ -18,7 +21,7 @@ internal LRESULT window_procedure_callback(HWND window, UINT message, WPARAM wpa
 
 		case WM_CLOSE:
 		{
-			DEBUG_printf("WM_CLOSE\n");
+			PostQuitMessage(0);
 			return 0;
 		} break;
 
@@ -30,7 +33,20 @@ internal LRESULT window_procedure_callback(HWND window, UINT message, WPARAM wpa
 
 		case WM_SIZE:
 		{
-			DEBUG_printf("WM_SIZE\n");
+			{
+				RECT client_rect;
+				GetClientRect(window, &client_rect);
+				g_backbuffer_bitmap_info.bmiHeader.biWidth  = client_rect.right - client_rect.left;
+				g_backbuffer_bitmap_info.bmiHeader.biHeight = client_rect.top   - client_rect.bottom; // @NOTE@ Top-down bitmap.
+			}
+
+			if (g_backbuffer_bitmap_data)
+			{
+				VirtualFree(g_backbuffer_bitmap_data, 0, MEM_RELEASE);
+			}
+
+			g_backbuffer_bitmap_data = reinterpret_cast<byte*>(VirtualAlloc(0, static_cast<size_t>(4) * g_backbuffer_bitmap_info.bmiHeader.biWidth * -g_backbuffer_bitmap_info.bmiHeader.biHeight, MEM_COMMIT, PAGE_READWRITE));
+
 			return 0;
 		} break;
 
@@ -39,7 +55,7 @@ internal LRESULT window_procedure_callback(HWND window, UINT message, WPARAM wpa
 			PAINTSTRUCT paint;
 			BeginPaint(window, &paint);
 
-			PatBlt(paint.hdc, paint.rcPaint.left, paint.rcPaint.top, paint.rcPaint.right - paint.rcPaint.left, paint.rcPaint.bottom - paint.rcPaint.top, BLACKNESS);
+			// @TODO@ Paint here...?
 
 			EndPaint(window, &paint);
 			return 0;
@@ -54,6 +70,11 @@ internal LRESULT window_procedure_callback(HWND window, UINT message, WPARAM wpa
 
 int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int cmd_show)
 {
+	g_backbuffer_bitmap_info.bmiHeader.biSize        = sizeof(g_backbuffer_bitmap_info.bmiHeader);
+	g_backbuffer_bitmap_info.bmiHeader.biPlanes      = 1;
+	g_backbuffer_bitmap_info.bmiHeader.biBitCount    = 32;
+	g_backbuffer_bitmap_info.bmiHeader.biCompression = BI_RGB;
+
 	constexpr wchar_t CLASS_NAME[] = L"HandemadeRalphWindowClass";
 
 	WNDCLASSEXW window_class = {};
@@ -84,8 +105,51 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int cmd_show)
 		{
 			TranslateMessage(&message);
 			DispatchMessage(&message);
-		}
-	}
 
-	return 0;
+			if (message.message == WM_QUIT)
+			{
+				DEBUG_printf("Exit code : %llu\n", message.wParam);
+				return 0;
+			}
+		}
+
+		DEBUG_persist offset_x = 0;
+		DEBUG_persist offset_y = 0;
+		offset_x += 1;
+		offset_y += 2;
+
+		FOR_RANGE(y, -g_backbuffer_bitmap_info.bmiHeader.biHeight)
+		{
+			FOR_RANGE(x, g_backbuffer_bitmap_info.bmiHeader.biWidth)
+			{
+				reinterpret_cast<u32*>(g_backbuffer_bitmap_data)[y * g_backbuffer_bitmap_info.bmiHeader.biWidth + x] =
+					static_cast<u32>(static_cast<u8>(offset_x                + x) << 16) |
+					static_cast<u32>(static_cast<u8>(offset_y                + y) <<  8) |
+					static_cast<u32>(static_cast<u8>(offset_x + offset_y + x + y) <<  0);
+			}
+		}
+
+		HDC device_context = GetDC(window);
+		DEFER { ReleaseDC(window, device_context); };
+
+		RECT client_rect;
+		GetClientRect(window, &client_rect);
+
+		StretchDIBits
+		(
+			device_context,
+			0,
+			0,
+			g_backbuffer_bitmap_info.bmiHeader.biWidth,
+			-g_backbuffer_bitmap_info.bmiHeader.biHeight,
+			0,
+			0,
+			client_rect.right  - client_rect.left,
+			client_rect.bottom - client_rect.top,
+			g_backbuffer_bitmap_data,
+			&g_backbuffer_bitmap_info,
+			DIB_RGB_COLORS,
+			SRCCOPY
+		);
+	}
 }

@@ -87,7 +87,7 @@ typedef double      f64;
 	#undef min
 	#undef max
 
-	#define DEBUG_persist static
+	#define DEBUG_persist static auto
 
 	#define ASSERT(EXPRESSION) do { if (!(EXPRESSION)) { *((i32*)(0)) = 0; } } while (false)
 
@@ -217,6 +217,7 @@ struct DEFER_
 	F f;
 	DEFER_(F f) : f(f) {}
 	~DEFER_() { f(); }
+	DEFER_ operator=(DEFER_&) = delete;
 };
 
 struct DEFER_EMPTY_ {};
