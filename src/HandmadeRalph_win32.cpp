@@ -159,6 +159,11 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int cmd_show)
 	// Initialize DirectSound.
 	//
 
+	constexpr i32 SAMPLES_PER_SECOND = 48000;
+	constexpr i32 SAMPLE_SIZE        = 2 * sizeof(i16);
+	constexpr u32 SOUND_BUFFER_SIZE  = 1 * SAMPLES_PER_SECOND * SAMPLE_SIZE;
+
+	IDirectSoundBuffer* directsound_buffer;
 	{
 		HMODULE directsound_dll = LoadLibraryW(L"dsound.dll");
 		if (!directsound_dll)
@@ -193,14 +198,12 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int cmd_show)
 			return -1;
 		}
 
-		constexpr i32 SAMPLES_PER_SECOND = 48000;
-
 		WAVEFORMATEX primary_buffer_format = {};
 		primary_buffer_format.wFormatTag      = WAVE_FORMAT_PCM;
 		primary_buffer_format.nChannels       = 2;
 		primary_buffer_format.nSamplesPerSec  = SAMPLES_PER_SECOND;
 		primary_buffer_format.wBitsPerSample  = 16;
-		primary_buffer_format.nBlockAlign     = static_cast<WORD>(primary_buffer_format.nChannels * primary_buffer_format.wBitsPerSample / 8);
+		primary_buffer_format.nBlockAlign     = primary_buffer_format.nChannels * primary_buffer_format.wBitsPerSample / 8U;
 		primary_buffer_format.nAvgBytesPerSec = primary_buffer_format.nSamplesPerSec * primary_buffer_format.nBlockAlign;
 		if (primary_buffer->SetFormat(&primary_buffer_format) != DS_OK)
 		{
@@ -208,18 +211,28 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int cmd_show)
 			return -1;
 		}
 
-		constexpr memsize SOUND_BUFFER_SIZE = 2 * SAMPLES_PER_SECOND * sizeof(i16);
-
 		DSBUFFERDESC secondary_buffer_description = {};
 		secondary_buffer_description.dwSize        = sizeof(secondary_buffer_description);
 		secondary_buffer_description.dwBufferBytes = SOUND_BUFFER_SIZE;
 		secondary_buffer_description.lpwfxFormat   = &primary_buffer_format;
-		IDirectSoundBuffer* secondary_buffer;
-		if (directsound->CreateSoundBuffer(&secondary_buffer_description, &secondary_buffer, 0) != DS_OK)
+		if (directsound->CreateSoundBuffer(&secondary_buffer_description, &directsound_buffer, 0) != DS_OK)
 		{
 			DEBUG_printf("DirectSound :: Could not create secondary buffer.\n");
 			return -1;
 		}
+
+		byte* region_0;
+		DWORD region_size_0;
+		byte* region_1;
+		DWORD region_size_1;
+		if (directsound_buffer->Lock(0, SOUND_BUFFER_SIZE, reinterpret_cast<void**>(&region_0), &region_size_0, reinterpret_cast<void**>(&region_1), &region_size_1, 0) == DS_OK)
+		{
+			memset(region_0, 0, region_size_0);
+			memset(region_1, 0, region_size_1);
+			directsound_buffer->Unlock(region_0, region_size_0, region_1, region_size_1);
+		}
+
+		directsound_buffer->Play(0, 0, DSBPLAY_LOOPING);
 	}
 
 	//
@@ -241,6 +254,8 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int cmd_show)
 
 	byte* backbuffer_bitmap_data = reinterpret_cast<byte*>(VirtualAlloc(0, static_cast<size_t>(4) * BACKBUFFER_BITMAP_INFO.bmiHeader.biWidth * -BACKBUFFER_BITMAP_INFO.bmiHeader.biHeight, MEM_COMMIT, PAGE_READWRITE));
 
+	u32 curr_sample_index = 0;
+
 	while (true)
 	{
 		for (MSG message; PeekMessageW(&message, 0, 0, 0, PM_REMOVE);)
@@ -255,10 +270,9 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int cmd_show)
 			}
 		}
 
-		DEBUG_persist offset_x = 0;
-		DEBUG_persist offset_y = 0;
+		DEBUG_persist i32 offset_x = 0;
+		DEBUG_persist i32 offset_y = 0;
 
-		// @TODO@ Casey said the polls on unactive controllers can cause a massive stall.
 		FOR_RANGE(i, XUSER_MAX_COUNT)
 		{
 			XINPUT_STATE gamepad_state;
@@ -300,24 +314,70 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int cmd_show)
 			}
 		}
 
-		HDC device_context = GetDC(window);
-		DEFER { ReleaseDC(window, device_context); };
+		{
+			HDC device_context = GetDC(window);
+			StretchDIBits
+			(
+				device_context,
+				0,
+				0,
+				g_client_dimensions.x,
+				g_client_dimensions.y,
+				0,
+				0,
+				BACKBUFFER_BITMAP_INFO.bmiHeader.biWidth,
+				-BACKBUFFER_BITMAP_INFO.bmiHeader.biHeight,
+				backbuffer_bitmap_data,
+				&BACKBUFFER_BITMAP_INFO,
+				DIB_RGB_COLORS,
+				SRCCOPY
+			);
+			ReleaseDC(window, device_context);
+		}
 
-		StretchDIBits
-		(
-			device_context,
-			0,
-			0,
-			g_client_dimensions.x,
-			g_client_dimensions.y,
-			0,
-			0,
-			BACKBUFFER_BITMAP_INFO.bmiHeader.biWidth,
-			-BACKBUFFER_BITMAP_INFO.bmiHeader.biHeight,
-			backbuffer_bitmap_data,
-			&BACKBUFFER_BITMAP_INFO,
-			DIB_RGB_COLORS,
-			SRCCOPY
-		);
+		{
+			DWORD play_offset;
+			DWORD write_offset;
+			if (directsound_buffer->GetCurrentPosition(&play_offset, &write_offset) == DS_OK)
+			{
+				DWORD sample_offset = curr_sample_index*SAMPLE_SIZE % SOUND_BUFFER_SIZE;
+				DWORD write_size;
+				if (sample_offset >= play_offset)
+				{
+					write_size = SOUND_BUFFER_SIZE - sample_offset + play_offset;
+				}
+				else
+				{
+					write_size = play_offset - sample_offset;
+				}
+
+				byte* region_0;
+				DWORD region_size_0;
+				byte* region_1;
+				DWORD region_size_1;
+				if (directsound_buffer->Lock(sample_offset, write_size, reinterpret_cast<void**>(&region_0), &region_size_0, reinterpret_cast<void**>(&region_1), &region_size_1, 0) == DS_OK)
+				{
+					lambda write_sample =
+						[&](u32* out)
+						{
+							reinterpret_cast<i16*>(out)[0] = reinterpret_cast<i16*>(out)[1] = static_cast<i16>(sin(static_cast<f64>(curr_sample_index) / (SAMPLES_PER_SECOND / 512.0f) * TAU) * 3000.0);
+						};
+
+					FOR_ELEMS(sample, reinterpret_cast<u32*>(region_0), static_cast<i32>(region_size_0 / SAMPLE_SIZE))
+					{
+						write_sample(sample);
+						curr_sample_index += 1;
+					}
+
+					FOR_ELEMS(sample, reinterpret_cast<u32*>(region_1), static_cast<i32>(region_size_1 / SAMPLE_SIZE))
+					{
+						write_sample(sample);
+						curr_sample_index += 1;
+					}
+
+					directsound_buffer->Unlock(region_0, region_size_0, region_1, region_size_1);
+				}
+			}
+		}
 	}
 }

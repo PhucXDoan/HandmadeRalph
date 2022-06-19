@@ -87,7 +87,7 @@ typedef double      f64;
 	#undef min
 	#undef max
 
-	#define DEBUG_persist static auto
+	#define DEBUG_persist static
 
 	#define ASSERT(EXPRESSION) do { if (!(EXPRESSION)) { *((i32*)(0)) = 0; } } while (false)
 
