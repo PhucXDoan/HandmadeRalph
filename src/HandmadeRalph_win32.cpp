@@ -17,6 +17,25 @@ global   XInputGetState_t* g_XInputGetState = stub_XInputGetState;
 typedef  DirectSoundCreate_t(DirectSoundCreate_t);
 
 global vi2 g_client_dimensions = { 0, 0 };
+global i64 g_performance_counter_frequency =
+	[](void)
+	{
+		LARGE_INTEGER n;
+		QueryPerformanceFrequency(&n);
+		return n.QuadPart;
+	}();
+
+internal i64 query_performance_counter(void)
+{
+	LARGE_INTEGER n;
+	QueryPerformanceCounter(&n);
+	return n.QuadPart;
+}
+
+internal f64 calc_performance_counter_delta_time(i64 start, i64 end)
+{
+	return static_cast<f64>(end - start) / g_performance_counter_frequency;
+}
 
 internal LRESULT window_procedure_callback(HWND window, UINT message, WPARAM wparam, LPARAM lparam)
 {
@@ -111,14 +130,14 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int cmd_show)
 
 	constexpr wchar_t CLASS_NAME[] = L"HandemadeRalphWindowClass";
 
-	WNDCLASSEXW window_class = {};
-	window_class.cbSize        = sizeof(window_class);
-	window_class.style         = CS_HREDRAW | CS_VREDRAW;
-	window_class.lpfnWndProc   = window_procedure_callback;
-	window_class.hInstance     = instance;
-	window_class.hIcon         = 0; // @TODO@ Icon.
-	window_class.lpszClassName = CLASS_NAME;
-	window_class.hIconSm       = 0; // @TODO@ Icon.
+	WNDCLASSEXW window_class =
+		{
+			.cbSize        = sizeof(window_class),
+			.style         = CS_HREDRAW | CS_VREDRAW,
+			.lpfnWndProc   = window_procedure_callback,
+			.hInstance     = instance,
+			.lpszClassName = CLASS_NAME
+		};
 
 	if (!RegisterClassExW(&window_class))
 	{
@@ -188,9 +207,11 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int cmd_show)
 			return -1;
 		}
 
-		DSBUFFERDESC primary_buffer_description = {};
-		primary_buffer_description.dwSize  = sizeof(primary_buffer_description);
-		primary_buffer_description.dwFlags = DSBCAPS_PRIMARYBUFFER;
+		DSBUFFERDESC primary_buffer_description =
+			{
+				.dwSize  = sizeof(primary_buffer_description),
+				.dwFlags = DSBCAPS_PRIMARYBUFFER
+			};
 		IDirectSoundBuffer* primary_buffer;
 		if (directsound->CreateSoundBuffer(&primary_buffer_description, &primary_buffer, 0) != DS_OK)
 		{
@@ -211,10 +232,12 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int cmd_show)
 			return -1;
 		}
 
-		DSBUFFERDESC secondary_buffer_description = {};
-		secondary_buffer_description.dwSize        = sizeof(secondary_buffer_description);
-		secondary_buffer_description.dwBufferBytes = SOUND_BUFFER_SIZE;
-		secondary_buffer_description.lpwfxFormat   = &primary_buffer_format;
+		DSBUFFERDESC secondary_buffer_description =
+			{
+				.dwSize        = sizeof(secondary_buffer_description),
+				.dwBufferBytes = SOUND_BUFFER_SIZE,
+				.lpwfxFormat   = &primary_buffer_format
+			};
 		if (directsound->CreateSoundBuffer(&secondary_buffer_description, &directsound_buffer, 0) != DS_OK)
 		{
 			DEBUG_printf("DirectSound :: Could not create secondary buffer.\n");
@@ -256,8 +279,14 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int cmd_show)
 
 	u32 curr_sample_index = 0;
 
+	i64 start_counter = query_performance_counter();
+
 	while (true)
 	{
+		i64 end_counter = query_performance_counter();
+		f64 delta_time  = calc_performance_counter_delta_time(start_counter, end_counter);
+		start_counter = end_counter;
+
 		for (MSG message; PeekMessageW(&message, 0, 0, 0, PM_REMOVE);)
 		{
 			TranslateMessage(&message);
@@ -272,6 +301,8 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int cmd_show)
 
 		DEBUG_persist i32 offset_x = 0;
 		DEBUG_persist i32 offset_y = 0;
+		DEBUG_persist f32 hertz    = 512.0f;
+		DEBUG_persist f32 timer    = 0.0f;
 
 		FOR_RANGE(i, XUSER_MAX_COUNT)
 		{
@@ -299,9 +330,8 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int cmd_show)
 
 				offset_x += thumb_stick_left.x >> 12;
 				offset_y += thumb_stick_left.y >> 12;
-			}
-			else
-			{
+
+				hertz = 512.0f + (thumb_stick_left.y >> 7);
 			}
 		}
 
@@ -340,15 +370,14 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int cmd_show)
 			DWORD write_offset;
 			if (directsound_buffer->GetCurrentPosition(&play_offset, &write_offset) == DS_OK)
 			{
-				DWORD sample_offset = curr_sample_index*SAMPLE_SIZE % SOUND_BUFFER_SIZE;
-				DWORD write_size;
-				if (sample_offset >= play_offset)
+				constexpr DWORD SOUND_LATENCY = SAMPLES_PER_SECOND / 15 * SAMPLE_SIZE; // @TODO@ Better latency.
+
+				DWORD target_offset = (play_offset + SOUND_LATENCY) % SOUND_BUFFER_SIZE;
+				DWORD sample_offset = curr_sample_index * SAMPLE_SIZE % SOUND_BUFFER_SIZE;
+				DWORD write_size    = target_offset - sample_offset;
+				if (target_offset < sample_offset)
 				{
-					write_size = SOUND_BUFFER_SIZE - sample_offset + play_offset;
-				}
-				else
-				{
-					write_size = play_offset - sample_offset;
+					write_size = SOUND_BUFFER_SIZE + write_size;
 				}
 
 				byte* region_0;
@@ -360,7 +389,9 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int cmd_show)
 					lambda write_sample =
 						[&](u32* out)
 						{
-							reinterpret_cast<i16*>(out)[0] = reinterpret_cast<i16*>(out)[1] = static_cast<i16>(sin(static_cast<f64>(curr_sample_index) / (SAMPLES_PER_SECOND / 512.0f) * TAU) * 3000.0);
+							DEBUG_persist f32 t = 0.0;
+							t += 1.0f / (SAMPLES_PER_SECOND / hertz) * TAU;
+							reinterpret_cast<i16*>(out)[0] = reinterpret_cast<i16*>(out)[1] = static_cast<i16>(sinf(t) * 500.0f);
 						};
 
 					FOR_ELEMS(sample, reinterpret_cast<u32*>(region_0), static_cast<i32>(region_size_0 / SAMPLE_SIZE))

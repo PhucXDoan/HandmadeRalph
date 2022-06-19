@@ -103,71 +103,36 @@ typedef double      f64;
 	#define DEBUG_once\
 	for (DEBUG_persist bool32 MACRO_CONCAT_(DEBUG_ONCE_, __LINE__) = true; MACRO_CONCAT_(DEBUG_ONCE_, __LINE__); MACRO_CONCAT_(DEBUG_ONCE_, __LINE__) = false)
 
-	#define DEBUG_PROFILER_create_group(GROUP_NAME, ...)\
-	enum struct GROUP_NAME : u8 { __VA_ARGS__, CAPACITY };\
-	constexpr     strlit        MACRO_CONCAT_(GROUP_NAME, _STRS)[GROUP_NAME::CAPACITY] = { MACRO_STRINGIFY_ARGS_(__VA_ARGS__) };\
-	DEBUG_persist LARGE_INTEGER MACRO_CONCAT_(GROUP_NAME, _LI_0)[GROUP_NAME::CAPACITY] = {};\
-	DEBUG_persist LARGE_INTEGER MACRO_CONCAT_(GROUP_NAME, _LI_1)[GROUP_NAME::CAPACITY] = {};\
-	DEBUG_persist u64           MACRO_CONCAT_(GROUP_NAME, _DATA)[GROUP_NAME::CAPACITY] = {}
+	global const i64 DEBUG_PERFORMANCE_COUNTER_FREQUENCY =
+		[](void)
+		{
+			LARGE_INTEGER n;
+			QueryPerformanceFrequency(&n);
+			return n.QuadPart;
+		}();
 
-	#define DEBUG_PROFILER_flush_group(GROUP_NAME, COUNT, GOAL)\
-	do\
+	#define DEBUG_PROFILER_start(NAME)\
+	LARGE_INTEGER MACRO_CONCAT_(NAME, _LI_0_);\
+	QueryPerformanceCounter(&MACRO_CONCAT_(NAME, _LI_0_));\
+	u64 MACRO_CONCAT_(NAME, _CC_0_) = __rdtsc()
+
+	#define DEBUG_PROFILER_end(NAME, SAMPLES)\
+	u64 MACRO_CONCAT_(NAME, _CC_1_) = __rdtsc();\
+	LARGE_INTEGER MACRO_CONCAT_(NAME, _LI_1_);\
+	QueryPerformanceCounter(&MACRO_CONCAT_(NAME, _LI_1_));\
+	DEBUG_persist u64 MACRO_CONCAT_(NAME, _LI_TOTAL_) = 0;\
+	DEBUG_persist u64 MACRO_CONCAT_(NAME, _CC_TOTAL_) = 0;\
+	DEBUG_persist u64 MACRO_CONCAT_(NAME, _COUNTER_)  = 0;\
+	MACRO_CONCAT_(NAME, _LI_TOTAL_)   += MACRO_CONCAT_(NAME, _LI_1_).QuadPart - MACRO_CONCAT_(NAME, _LI_0_).QuadPart;\
+	MACRO_CONCAT_(NAME, _CC_TOTAL_)   += MACRO_CONCAT_(NAME, _CC_1_)          - MACRO_CONCAT_(NAME, _CC_0_);\
+	MACRO_CONCAT_(NAME, _COUNTER_) += 1;\
+	if (MACRO_CONCAT_(NAME, _COUNTER_) >= (SAMPLES))\
 	{\
-		if (DEBUG_persist u64 MACRO_CONCAT_(GROUP_NAME, _COUNTER) = 0; ++MACRO_CONCAT_(GROUP_NAME, _COUNTER) >= (COUNT))\
-		{\
-			MACRO_CONCAT_(GROUP_NAME, _COUNTER) = 0;\
-			u64           MACRO_CONCAT_(GROUP_NAME, _TOTAL) = 0;\
-			LARGE_INTEGER MACRO_CONCAT_(GROUP_NAME, _FREQUENCY);\
-			QueryPerformanceFrequency(&MACRO_CONCAT_(GROUP_NAME, _FREQUENCY));\
-			FOR_RANGE(MACRO_CONCAT_(GROUP_NAME, _INDEX), static_cast<u8>(GROUP_NAME::CAPACITY))\
-			{\
-				MACRO_CONCAT_(GROUP_NAME, _TOTAL) += MACRO_CONCAT_(GROUP_NAME, _DATA)[MACRO_CONCAT_(GROUP_NAME, _INDEX)];\
-			}\
-			DEBUG_printf\
-			(\
-				#GROUP_NAME " TOTAL\n\t(%fs) (%.2f%%) %llu\n",\
-				MACRO_CONCAT_(GROUP_NAME, _TOTAL) / static_cast<f64>((COUNT) * MACRO_CONCAT_(GROUP_NAME, _FREQUENCY).QuadPart),\
-				MACRO_CONCAT_(GROUP_NAME, _TOTAL) / static_cast<f64>((COUNT) * MACRO_CONCAT_(GROUP_NAME, _FREQUENCY).QuadPart) / (GOAL) * 100.0,\
-				MACRO_CONCAT_(GROUP_NAME, _TOTAL)\
-			);\
-			FOR_RANGE(MACRO_CONCAT_(GROUP_NAME, _INDEX), static_cast<u8>(GROUP_NAME::CAPACITY))\
-			{\
-				DEBUG_printf\
-				(\
-					"%s\n\t(%.3f) %llu\n",\
-					MACRO_CONCAT_(GROUP_NAME, _STRS)[MACRO_CONCAT_(GROUP_NAME, _INDEX)],\
-					MACRO_CONCAT_(GROUP_NAME, _DATA)[MACRO_CONCAT_(GROUP_NAME, _INDEX)] / static_cast<f64>(MACRO_CONCAT_(GROUP_NAME, _TOTAL)),\
-					MACRO_CONCAT_(GROUP_NAME, _DATA)[MACRO_CONCAT_(GROUP_NAME, _INDEX)]\
-				);\
-				MACRO_CONCAT_(GROUP_NAME, _DATA)[MACRO_CONCAT_(GROUP_NAME, _INDEX)] = 0;\
-			}\
-			DEBUG_printf("\n");\
-		}\
-	}\
-	while (false)
-
-	#define DEBUG_PROFILER_start(GROUP_NAME, SUBGROUP_NAME)\
-	do { QueryPerformanceCounter(&MACRO_CONCAT_(GROUP_NAME, _LI_0)[static_cast<u8>(GROUP_NAME::SUBGROUP_NAME)]); } while (false)
-
-	#define DEBUG_PROFILER_end(GROUP_NAME, SUBGROUP_NAME)\
-	do\
-	{\
-		QueryPerformanceCounter(&MACRO_CONCAT_(GROUP_NAME, _LI_1)[static_cast<u8>(GROUP_NAME::SUBGROUP_NAME)]);\
-		MACRO_CONCAT_(GROUP_NAME, _DATA)[static_cast<u8>(GROUP_NAME::SUBGROUP_NAME)] += MACRO_CONCAT_(GROUP_NAME, _LI_1)[static_cast<u8>(GROUP_NAME::SUBGROUP_NAME)].QuadPart - MACRO_CONCAT_(GROUP_NAME, _LI_0)[static_cast<u8>(GROUP_NAME::SUBGROUP_NAME)].QuadPart;\
-	} while (false)
-
-	#define DEBUG_STDOUT_HALT()\
-	do\
-	{\
-		printf\
-		(\
-			"======================== DEBUG_STDOUT_HALT ========================\n"\
-			"A stdout halt occured from file `" __FILE__ "` on line " MACRO_STRINGIFY_(__LINE__) ".\n"\
-			"===================================================================\n"\
-		);\
-		fgetc(stdin);\
-	}\
-	while (false)
+		DEBUG_printf(MACRO_STRINGIFY_(NAME) "\n\t:: %8.4f ms\n\t:: %8.4f mc\n", static_cast<f64>(MACRO_CONCAT_(NAME, _LI_TOTAL_)) / MACRO_CONCAT_(NAME, _COUNTER_) / DEBUG_PERFORMANCE_COUNTER_FREQUENCY * 1000.0, static_cast<f64>(MACRO_CONCAT_(NAME, _CC_TOTAL_)) / MACRO_CONCAT_(NAME, _COUNTER_) / 1000000.0);\
+		MACRO_CONCAT_(NAME, _LI_TOTAL_) = 0;\
+		MACRO_CONCAT_(NAME, _CC_TOTAL_) = 0;\
+		MACRO_CONCAT_(NAME, _COUNTER_)  = 0;\
+	}
 #else
 	#define ASSERT(EXPRESSION)
 	#define DEBUG_printf(FSTR, ...)
