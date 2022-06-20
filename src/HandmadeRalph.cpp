@@ -1,40 +1,54 @@
-global f32 g_hertz = 512.0f;
+struct State
+{
+	bool32 initialized;
+	f32    hertz;
+	vi2    offset;
+	f32    t;
+};
+static_assert(sizeof(State) < PLATFORM_MEMORY_SIZE / 4);
 
 PlatformUpdate_t(PlatformUpdate)
 {
-	DEBUG_persist vi2 offset;
+	State* state = reinterpret_cast<State*>(platform_memory);
+
+	if (!state->initialized)
+	{
+		state->initialized = true;
+		state->hertz       = 512.0f;
+	}
 
 	if (BTN_DOWN(.gamepads[0].action_left))
 	{
-		offset.x -= 1;
+		state->offset.x -= 1;
 	}
 	if (BTN_DOWN(.gamepads[0].action_right))
 	{
-		offset.x += 1;
+		state->offset.x += 1;
 	}
 	if (BTN_DOWN(.gamepads[0].action_down))
 	{
-		offset.y += 1;
+		state->offset.y += 1;
 	}
 	if (BTN_DOWN(.gamepads[0].action_up))
 	{
-		offset.y -= 1;
+		state->offset.y -= 1;
 	}
+	state->hertz += BTN_DOWN(.arrow_up);
 
 	FOR_RANGE(y, platform_framebuffer->dimensions.y)
 	{
 		FOR_RANGE(x, platform_framebuffer->dimensions.x)
 		{
-			platform_framebuffer->pixels[y * platform_framebuffer->dimensions.x + x] = vxx_argb(vi3 { offset.x + x, offset.y + y, offset.x + x + offset.y + y });
+			platform_framebuffer->pixels[y * platform_framebuffer->dimensions.x + x] =
+				vxx_argb(vi3 { state->offset.x + x, state->offset.y + y, state->offset.x + x + state->offset.y + y });
 		}
 	}
 }
 
 PlatformSound_t(PlatformSound)
 {
-	//DEBUG_persist f32 t;
-	//t += 1.0f / (platform_samples_per_second / g_hertz) * TAU;
-	//return { static_cast<i16>(sinf(t) * 500.0f), static_cast<i16>(sinf(t) * 500.0f) };
-
+	//State* state = reinterpret_cast<State*>(platform_memory);
+	//state->t += TAU * state->hertz / platform_samples_per_second;
+	//return { static_cast<i16>(sinf(state->t) * 500.0f), static_cast<i16>(sinf(state->t) * 500.0f) };
 	return {};
 }

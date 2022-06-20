@@ -276,6 +276,9 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int cmd_show)
 		};
 
 	byte* backbuffer_bitmap_data = reinterpret_cast<byte*>(VirtualAlloc(0, static_cast<size_t>(4) * BACKBUFFER_BITMAP_INFO.bmiHeader.biWidth * -BACKBUFFER_BITMAP_INFO.bmiHeader.biHeight, MEM_COMMIT, PAGE_READWRITE));
+	byte* platform_memory        = reinterpret_cast<byte*>(VirtualAlloc(0, PLATFORM_MEMORY_SIZE, MEM_COMMIT, PAGE_READWRITE));
+	ASSERT(backbuffer_bitmap_data);
+	ASSERT(platform_memory);
 
 	u32 curr_sample_index = 0;
 
@@ -339,7 +342,7 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int cmd_show)
 		{
 			frame_time -= SECONDS_PER_UPDATE;
 
-			PlatformUpdate(&platform_framebuffer, &g_platform_input);
+			PlatformUpdate(&platform_framebuffer, &g_platform_input, platform_memory);
 
 			FOR_ELEMS(g_platform_input.buttons)
 			{
@@ -392,13 +395,13 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int cmd_show)
 					ASSERT(region_size_0 % SAMPLE_SIZE == 0);
 					FOR_ELEMS(sample, reinterpret_cast<u32*>(region_0), static_cast<i32>(region_size_0 / SAMPLE_SIZE))
 					{
-						*sample = PlatformSound(SAMPLES_PER_SECOND).sample;
+						*sample = PlatformSound(SAMPLES_PER_SECOND, platform_memory).sample;
 					}
 
 					ASSERT(region_size_1 % SAMPLE_SIZE == 0);
 					FOR_ELEMS(sample, reinterpret_cast<u32*>(region_1), static_cast<i32>(region_size_1 / SAMPLE_SIZE))
 					{
-						*sample = PlatformSound(SAMPLES_PER_SECOND).sample;
+						*sample = PlatformSound(SAMPLES_PER_SECOND, platform_memory).sample;
 					}
 
 					curr_sample_index += static_cast<i32>(region_size_0 / SAMPLE_SIZE) + static_cast<i32>(region_size_1 / SAMPLE_SIZE);

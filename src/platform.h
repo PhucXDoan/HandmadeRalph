@@ -1,4 +1,14 @@
 #pragma once
+#define BUTTON_DOWN(BUTTON)     ((BUTTON) >> 7)
+#define BUTTON_PRESSES(BUTTON)  ((((BUTTON) & 0b01111111) >> 1) + ( BUTTON_DOWN(BUTTON) & ((BUTTON) & 0b1)))
+#define BUTTON_RELEASES(BUTTON) ((((BUTTON) & 0b01111111) >> 1) + (~BUTTON_DOWN(BUTTON) & ((BUTTON) & 0b1)))
+
+#define BTN_DOWN(BTN)     BUTTON_DOWN(MACRO_CONCAT_(platform_input->button, BTN))
+#define BTN_PRESSES(BTN)  BUTTON_DOWN(MACRO_CONCAT_(platform_input->button, BTN))
+#define BTN_RELEASES(BTN) BUTTON_DOWN(MACRO_CONCAT_(platform_input->button, BTN))
+
+global constexpr i32     PLATFORM_GAMEPAD_MAX = 4;
+global constexpr memsize PLATFORM_MEMORY_SIZE = GIBIBYTES_OF(1);
 
 struct PlatformFramebuffer
 {
@@ -19,16 +29,7 @@ struct PlatformSample
 		u32 sample;
 	};
 };
-
-#define BUTTON_DOWN(BUTTON)     ((BUTTON) >> 7)
-#define BUTTON_PRESSES(BUTTON)  ((((BUTTON) & 0b01111111) >> 1) + ( BUTTON_DOWN(BUTTON) & ((BUTTON) & 0b1)))
-#define BUTTON_RELEASES(BUTTON) ((((BUTTON) & 0b01111111) >> 1) + (~BUTTON_DOWN(BUTTON) & ((BUTTON) & 0b1)))
-
-#define BTN_DOWN(BTN)     BUTTON_DOWN(MACRO_CONCAT_(platform_input->button, BTN))
-#define BTN_PRESSES(BTN)  BUTTON_DOWN(MACRO_CONCAT_(platform_input->button, BTN))
-#define BTN_RELEASES(BTN) BUTTON_DOWN(MACRO_CONCAT_(platform_input->button, BTN))
-
-global constexpr i32 PLATFORM_GAMEPAD_MAX = 4;
+static_assert(sizeof(PlatformSample) == sizeof(u32));
 
 struct PlatformInput
 {
@@ -76,10 +77,8 @@ struct PlatformInput
 	} gamepads[PLATFORM_GAMEPAD_MAX];
 };
 
-static_assert(sizeof(PlatformSample) == sizeof(u32));
-
-#define PlatformUpdate_t(NAME) void NAME(PlatformFramebuffer* platform_framebuffer, PlatformInput* platform_input)
+#define PlatformUpdate_t(NAME) void NAME(PlatformFramebuffer* platform_framebuffer, PlatformInput* platform_input, byte* platform_memory)
 typedef PlatformUpdate_t(PlatformUpdate_t);
 
-#define PlatformSound_t(NAME) PlatformSample NAME(i32 platform_samples_per_second)
+#define PlatformSound_t(NAME) PlatformSample NAME(i32 platform_samples_per_second, byte* platform_memory)
 typedef PlatformSound_t(PlatformSound_t);
