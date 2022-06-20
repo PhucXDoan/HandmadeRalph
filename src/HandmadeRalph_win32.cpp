@@ -7,6 +7,11 @@
 #include <dsound.h>
 #pragma warning(pop)
 #include "unified.h"
+#include "platform.h"
+
+#include "HandmadeRalph.cpp"
+
+#define PROCESS_PLATFORM_BUTTON(BUTTON, IS_DOWN) MACRO_CONCAT_(g_platform_input.button, BUTTON) = static_cast<u8>(((MACRO_CONCAT_(g_platform_input.button, BUTTON) + ((MACRO_CONCAT_(g_platform_input.button, BUTTON) >> 7) != (IS_DOWN))) & 0b01111111) | ((IS_DOWN) << 7))
 
 #define  XInputGetState_t(NAME) DWORD NAME(DWORD dwUserIndex, XINPUT_STATE *pState)
 typedef  XInputGetState_t(XInputGetState_t);
@@ -16,8 +21,9 @@ global   XInputGetState_t* g_XInputGetState = stub_XInputGetState;
 #define  DirectSoundCreate_t(NAME) HRESULT WINAPI NAME(LPGUID lpGuid, LPDIRECTSOUND* ppDS, LPUNKNOWN pUnkOuter)
 typedef  DirectSoundCreate_t(DirectSoundCreate_t);
 
-global vi2 g_client_dimensions = { 0, 0 };
-global i64 g_performance_counter_frequency =
+global vi2           g_client_dimensions             = { 0, 0 };
+global PlatformInput g_platform_input                = {};
+global i64           g_performance_counter_frequency =
 	[](void)
 	{
 		LARGE_INTEGER n;
@@ -41,21 +47,9 @@ internal LRESULT window_procedure_callback(HWND window, UINT message, WPARAM wpa
 {
 	switch (message)
 	{
-		case WM_ACTIVATEAPP:
-		{
-			DEBUG_printf("WM_ACTIVATEAPP\n");
-			return 0;
-		} break;
-
 		case WM_CLOSE:
 		{
 			PostQuitMessage(0);
-			return 0;
-		} break;
-
-		case WM_DESTROY:
-		{
-			DEBUG_printf("WM_DESTROY\n");
 			return 0;
 		} break;
 
@@ -83,34 +77,40 @@ internal LRESULT window_procedure_callback(HWND window, UINT message, WPARAM wpa
 		case WM_KEYDOWN:
 		case WM_KEYUP:
 		{
-			bool32 was_down = (lparam & (1 << 30)) != 0;
-			bool32 is_down  = (lparam & (1 << 31)) == 0;
-
-			switch (wparam)
+			bool8 was_down = (lparam & (1 << 30)) != 0;
+			bool8 is_down  = (lparam & (1 << 31)) == 0;
+			if (!(was_down && is_down))
 			{
-				case 'A':
+				if (IN_RANGE(wparam, 'A', 'Z' + 1))
 				{
-					if (is_down)
+					PROCESS_PLATFORM_BUTTON(.letters[wparam - 'A'], is_down);
+				}
+				else if (IN_RANGE(wparam, '0', '9' + 1))
+				{
+					PROCESS_PLATFORM_BUTTON(.numbers[wparam - '0'], is_down);
+				}
+				else
+				{
+					switch (wparam)
 					{
-						if (!was_down)
-						{
-							DEBUG_printf("a\n");
-						}
-					}
-					else if (was_down)
-					{
-						DEBUG_printf("b\n");
-					}
-				} break;
+						case VK_LEFT   : { PROCESS_PLATFORM_BUTTON(.arrow_left,  is_down); } break;
+						case VK_RIGHT  : { PROCESS_PLATFORM_BUTTON(.arrow_right, is_down); } break;
+						case VK_DOWN   : { PROCESS_PLATFORM_BUTTON(.arrow_down,  is_down); } break;
+						case VK_UP     : { PROCESS_PLATFORM_BUTTON(.arrow_up,    is_down); } break;
+						case VK_RETURN : { PROCESS_PLATFORM_BUTTON(.enter,       is_down); } break;
+						case VK_SHIFT  : { PROCESS_PLATFORM_BUTTON(.shift,       is_down); } break;
 
-				case VK_F4:
-				{
-					if (is_down && !was_down && (lparam & (1 << 29)))
-					{
-						PostQuitMessage(0);
+						case VK_F4:
+						{
+							if (lparam & (1 << 29))
+							{
+								PostQuitMessage(0);
+							}
+						} break;
 					}
-				} break;
+				}
 			}
+
 
 			return 0;
 		} break;
@@ -279,13 +279,13 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int cmd_show)
 
 	u32 curr_sample_index = 0;
 
-	i64 start_counter = query_performance_counter();
-
+	f64 frame_time    = 0.0;
+	i64 counter_start = query_performance_counter();
 	while (true)
 	{
-		i64 end_counter = query_performance_counter();
-		f64 delta_time  = calc_performance_counter_delta_time(start_counter, end_counter);
-		start_counter = end_counter;
+		i64 counter_end = query_performance_counter();
+		f64 delta_time  = calc_performance_counter_delta_time(counter_start, counter_end);
+		counter_start = counter_end;
 
 		for (MSG message; PeekMessageW(&message, 0, 0, 0, PM_REMOVE);)
 		{
@@ -299,48 +299,51 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int cmd_show)
 			}
 		}
 
-		DEBUG_persist i32 offset_x = 0;
-		DEBUG_persist i32 offset_y = 0;
-		DEBUG_persist f32 hertz    = 512.0f;
-		DEBUG_persist f32 timer    = 0.0f;
-
 		FOR_RANGE(i, XUSER_MAX_COUNT)
 		{
 			XINPUT_STATE gamepad_state;
 			if (g_XInputGetState(static_cast<DWORD>(i), &gamepad_state) == ERROR_SUCCESS)
 			{
-				bool8 dpad_up           = (gamepad_state.Gamepad.wButtons & XINPUT_GAMEPAD_DPAD_UP       ) != 0;
-				bool8 dpad_down         = (gamepad_state.Gamepad.wButtons & XINPUT_GAMEPAD_DPAD_DOWN     ) != 0;
-				bool8 dpad_left         = (gamepad_state.Gamepad.wButtons & XINPUT_GAMEPAD_DPAD_LEFT     ) != 0;
-				bool8 dpad_right        = (gamepad_state.Gamepad.wButtons & XINPUT_GAMEPAD_DPAD_RIGHT    ) != 0;
-				bool8 misc_start        = (gamepad_state.Gamepad.wButtons & XINPUT_GAMEPAD_START         ) != 0;
-				bool8 misc_back         = (gamepad_state.Gamepad.wButtons & XINPUT_GAMEPAD_BACK          ) != 0;
-				bool8 thumb_left        = (gamepad_state.Gamepad.wButtons & XINPUT_GAMEPAD_LEFT_THUMB    ) != 0;
-				bool8 thumb_right       = (gamepad_state.Gamepad.wButtons & XINPUT_GAMEPAD_RIGHT_THUMB   ) != 0;
-				bool8 shoulder_left     = (gamepad_state.Gamepad.wButtons & XINPUT_GAMEPAD_LEFT_SHOULDER ) != 0;
-				bool8 shoulder_right    = (gamepad_state.Gamepad.wButtons & XINPUT_GAMEPAD_RIGHT_SHOULDER) != 0;
-				bool8 button_a          = (gamepad_state.Gamepad.wButtons & XINPUT_GAMEPAD_A             ) != 0;
-				bool8 button_b          = (gamepad_state.Gamepad.wButtons & XINPUT_GAMEPAD_B             ) != 0;
-				bool8 button_x          = (gamepad_state.Gamepad.wButtons & XINPUT_GAMEPAD_X             ) != 0;
-				bool8 button_y          = (gamepad_state.Gamepad.wButtons & XINPUT_GAMEPAD_Y             ) != 0;
-				i32   trigger_left      = gamepad_state.Gamepad.bLeftTrigger;
-				i32   trigger_right     = gamepad_state.Gamepad.bRightTrigger;
-				vi2   thumb_stick_left  = { gamepad_state.Gamepad.sThumbLX, gamepad_state.Gamepad.sThumbLY };
-				vi2   thumb_stick_right = { gamepad_state.Gamepad.sThumbRX, gamepad_state.Gamepad.sThumbRY };
+				PROCESS_PLATFORM_BUTTON(.gamepads[i].action_left,    (gamepad_state.Gamepad.wButtons & XINPUT_GAMEPAD_X             ) != 0);
+				PROCESS_PLATFORM_BUTTON(.gamepads[i].action_right,   (gamepad_state.Gamepad.wButtons & XINPUT_GAMEPAD_B             ) != 0);
+				PROCESS_PLATFORM_BUTTON(.gamepads[i].action_down,    (gamepad_state.Gamepad.wButtons & XINPUT_GAMEPAD_A             ) != 0);
+				PROCESS_PLATFORM_BUTTON(.gamepads[i].action_up,      (gamepad_state.Gamepad.wButtons & XINPUT_GAMEPAD_Y             ) != 0);
+				PROCESS_PLATFORM_BUTTON(.gamepads[i].dpad_up,        (gamepad_state.Gamepad.wButtons & XINPUT_GAMEPAD_DPAD_UP       ) != 0);
+				PROCESS_PLATFORM_BUTTON(.gamepads[i].dpad_down,      (gamepad_state.Gamepad.wButtons & XINPUT_GAMEPAD_DPAD_DOWN     ) != 0);
+				PROCESS_PLATFORM_BUTTON(.gamepads[i].dpad_left,      (gamepad_state.Gamepad.wButtons & XINPUT_GAMEPAD_DPAD_LEFT     ) != 0);
+				PROCESS_PLATFORM_BUTTON(.gamepads[i].dpad_right,     (gamepad_state.Gamepad.wButtons & XINPUT_GAMEPAD_DPAD_RIGHT    ) != 0);
+				PROCESS_PLATFORM_BUTTON(.gamepads[i].shoulder_left,  (gamepad_state.Gamepad.wButtons & XINPUT_GAMEPAD_LEFT_SHOULDER ) != 0);
+				PROCESS_PLATFORM_BUTTON(.gamepads[i].shoulder_right, (gamepad_state.Gamepad.wButtons & XINPUT_GAMEPAD_RIGHT_SHOULDER) != 0);
+				PROCESS_PLATFORM_BUTTON(.gamepads[i].stick_left,     (gamepad_state.Gamepad.wButtons & XINPUT_GAMEPAD_LEFT_THUMB    ) != 0);
+				PROCESS_PLATFORM_BUTTON(.gamepads[i].stick_right,    (gamepad_state.Gamepad.wButtons & XINPUT_GAMEPAD_RIGHT_THUMB   ) != 0);
+				PROCESS_PLATFORM_BUTTON(.gamepads[i].start,          (gamepad_state.Gamepad.wButtons & XINPUT_GAMEPAD_START         ) != 0);
+				PROCESS_PLATFORM_BUTTON(.gamepads[i].back,           (gamepad_state.Gamepad.wButtons & XINPUT_GAMEPAD_BACK          ) != 0);
 
-				offset_x += thumb_stick_left.x >> 12;
-				offset_y += thumb_stick_left.y >> 12;
-
-				hertz = 512.0f + (thumb_stick_left.y >> 7);
+				g_platform_input.gamepads[i].trigger_left  = gamepad_state.Gamepad.bLeftTrigger  / 255.0f;
+				g_platform_input.gamepads[i].trigger_right = gamepad_state.Gamepad.bRightTrigger / 255.0f;
+				g_platform_input.gamepads[i].stick_left    = vi2 { gamepad_state.Gamepad.sThumbLX, gamepad_state.Gamepad.sThumbLY } / 32768.0f;
+				g_platform_input.gamepads[i].stick_right   = vi2 { gamepad_state.Gamepad.sThumbRX, gamepad_state.Gamepad.sThumbRY } / 32768.0f;
 			}
 		}
 
-		FOR_RANGE(y, -BACKBUFFER_BITMAP_INFO.bmiHeader.biHeight)
-		{
-			FOR_RANGE(x, BACKBUFFER_BITMAP_INFO.bmiHeader.biWidth)
+		PlatformFramebuffer platform_framebuffer =
 			{
-				reinterpret_cast<u32*>(backbuffer_bitmap_data)[y * BACKBUFFER_BITMAP_INFO.bmiHeader.biWidth + x] =
-					vxx_argb(vi3 { offset_x + x, offset_y + y, offset_x + offset_y + x + y });
+				.dimensions = { BACKBUFFER_BITMAP_INFO.bmiHeader.biWidth, -BACKBUFFER_BITMAP_INFO.bmiHeader.biHeight },
+				.pixels     = reinterpret_cast<u32*>(backbuffer_bitmap_data)
+			};
+
+		frame_time += delta_time;
+
+		constexpr f64 SECONDS_PER_UPDATE = 1.0 / 60.0;
+		if (frame_time >= SECONDS_PER_UPDATE)
+		{
+			frame_time -= SECONDS_PER_UPDATE;
+
+			PlatformUpdate(&platform_framebuffer, &g_platform_input);
+
+			FOR_ELEMS(g_platform_input.buttons)
+			{
+				*it &= 0b10000000;
 			}
 		}
 
@@ -386,26 +389,19 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int cmd_show)
 				DWORD region_size_1;
 				if (directsound_buffer->Lock(sample_offset, write_size, reinterpret_cast<void**>(&region_0), &region_size_0, reinterpret_cast<void**>(&region_1), &region_size_1, 0) == DS_OK)
 				{
-					lambda write_sample =
-						[&](u32* out)
-						{
-							DEBUG_persist f32 t = 0.0;
-							t += 1.0f / (SAMPLES_PER_SECOND / hertz) * TAU;
-							reinterpret_cast<i16*>(out)[0] = reinterpret_cast<i16*>(out)[1] = static_cast<i16>(sinf(t) * 500.0f);
-						};
-
+					ASSERT(region_size_0 % SAMPLE_SIZE == 0);
 					FOR_ELEMS(sample, reinterpret_cast<u32*>(region_0), static_cast<i32>(region_size_0 / SAMPLE_SIZE))
 					{
-						write_sample(sample);
-						curr_sample_index += 1;
+						*sample = PlatformSound(SAMPLES_PER_SECOND).sample;
 					}
 
+					ASSERT(region_size_1 % SAMPLE_SIZE == 0);
 					FOR_ELEMS(sample, reinterpret_cast<u32*>(region_1), static_cast<i32>(region_size_1 / SAMPLE_SIZE))
 					{
-						write_sample(sample);
-						curr_sample_index += 1;
+						*sample = PlatformSound(SAMPLES_PER_SECOND).sample;
 					}
 
+					curr_sample_index += static_cast<i32>(region_size_0 / SAMPLE_SIZE) + static_cast<i32>(region_size_1 / SAMPLE_SIZE);
 					directsound_buffer->Unlock(region_0, region_size_0, region_1, region_size_1);
 				}
 			}

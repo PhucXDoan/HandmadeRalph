@@ -3,7 +3,7 @@ setlocal ENABLEDELAYEDEXPANSION
 
 set DEBUG=1
 set WARNINGS=/W4 /Wall /wd4201 /wd5219 /wd4668 /wd5045
-set DEBUG_WARNINGS=%WARNINGS% /wd4505 /wd4100 /wd4101 /wd4514 /wd4189 /wd4191
+set DEBUG_WARNINGS=%WARNINGS% /wd4505 /wd4100 /wd4101 /wd4514 /wd4189 /wd4191 /wd4820
 set LIBRARIES=user32.lib gdi32.lib
 
 IF NOT EXIST W:\build\ (
@@ -29,6 +29,7 @@ REM C4101       : "'identifier' : unreferenced local variable"
 REM C4514       : "'function' : unreferenced inline function has been removed"
 REM C4189       : "'identifier' : local variable is initialized but not referenced"
 REM C4191       : "'operator/operation' : unsafe conversion from 'type of expression' to 'type required'"
+REM C4820       : "'bytes' bytes padding added after construct 'member_name'"
 REM /Z7         : "The /Z7 option produces object files that also contain full symbolic debugging information for use with the debugger."
 REM /MTd        : "Defines _DEBUG and _MT. This option also causes the compiler to place the library name LIBCMTD.lib into the .obj file so that the linker will use LIBCMTD.lib to resolve external symbols."
 REM /GR         : "Adds code to check object types at run time."
