@@ -50,7 +50,7 @@ typedef double      f64;
 #define FOR_INDICIES_(NAME, MAXI)           FOR_INTERVAL_(NAME, 0, (MAXI))
 #define FOR_REPEAT_(MAXI)                   FOR_INTERVAL_(MACRO_CONCAT_(FOR_REPEAT_, __LINE__), 0, (MAXI))
 #define FOR_RANGE(...)                      MACRO_EXPAND_(MACRO_OVERLOADED_3_(__VA_ARGS__, FOR_INTERVAL_, FOR_INDICIES_, FOR_REPEAT_)(__VA_ARGS__))
-#define FOR_INTERVAL_REV_(NAME, MINI, MAXI) for (i32 NAME = (MAXI) - 1, MACRO_CONCAT_(NAME, min); NAME >= MACRO_CONCAT_(NAME, min); NAME -= 1)
+#define FOR_INTERVAL_REV_(NAME, MINI, MAXI) for (i32 NAME = (MAXI) - 1; NAME >= (MINI); NAME -= 1)
 #define FOR_INDICIES_REV_(NAME, MAXI)       FOR_INTERVAL_REV_(NAME, 0, (MAXI))
 #define FOR_RANGE_REV(...)                  MACRO_EXPAND_(MACRO_OVERLOADED_3_(__VA_ARGS__, FOR_INTERVAL_REV_, FOR_INDICIES_REV_)(__VA_ARGS__))
 
@@ -96,6 +96,16 @@ typedef double      f64;
 		char MACRO_CONCAT_(DEBUG_PRINTF_, __LINE__)[1024];\
 		sprintf_s(MACRO_CONCAT_(DEBUG_PRINTF_, __LINE__), sizeof(MACRO_CONCAT_(DEBUG_PRINTF_, __LINE__)), (FSTR), __VA_ARGS__);\
 		OutputDebugStringA(MACRO_CONCAT_(DEBUG_PRINTF_, __LINE__));\
+	}\
+	while (false)
+
+	#define DEBUG_print_bits(N, BITS)\
+	do\
+	{\
+		FOR_RANGE_REV(i, (BITS))\
+		{\
+			DEBUG_printf("%d", ((N) >> i) & 0b1);\
+		}\
 	}\
 	while (false)
 

@@ -1,3 +1,6 @@
+#include "unified.h"
+#include "platform.h"
+
 struct State
 {
 	bool32 initialized;
@@ -16,6 +19,8 @@ PlatformUpdate_t(PlatformUpdate)
 		state->initialized = true;
 		state->hertz       = 512.0f;
 	}
+
+	state->offset.x += static_cast<i32>(200.0f * platform_delta_time);
 
 	if (BTN_DOWN(.gamepads[0].action_left))
 	{
@@ -43,6 +48,8 @@ PlatformUpdate_t(PlatformUpdate)
 				vxx_argb(vi3 { state->offset.x + x, state->offset.y + y, state->offset.x + x + state->offset.y + y });
 		}
 	}
+
+	DEBUG_printf("down %d | presses %d | releases %d\n", BTN_DOWN(.letters[0]), BTN_PRESSES(.letters[0]), BTN_RELEASES(.letters[0]));
 }
 
 PlatformSound_t(PlatformSound)

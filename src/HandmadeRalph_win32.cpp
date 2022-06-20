@@ -9,8 +9,6 @@
 #include "unified.h"
 #include "platform.h"
 
-#include "HandmadeRalph.cpp"
-
 #define PROCESS_PLATFORM_BUTTON(BUTTON, IS_DOWN) MACRO_CONCAT_(g_platform_input.button, BUTTON) = static_cast<u8>(((MACRO_CONCAT_(g_platform_input.button, BUTTON) + ((MACRO_CONCAT_(g_platform_input.button, BUTTON) >> 7) != (IS_DOWN))) & 0b01111111) | ((IS_DOWN) << 7))
 
 #define  XInputGetState_t(NAME) DWORD NAME(DWORD dwUserIndex, XINPUT_STATE *pState)
@@ -38,9 +36,9 @@ internal i64 query_performance_counter(void)
 	return n.QuadPart;
 }
 
-internal f64 calc_performance_counter_delta_time(i64 start, i64 end)
+internal f32 calc_performance_counter_delta_time(i64 start, i64 end)
 {
-	return static_cast<f64>(end - start) / g_performance_counter_frequency;
+	return static_cast<f32>(end - start) / g_performance_counter_frequency;
 }
 
 PlatformReadFile_t(PlatformReadFile)
@@ -132,6 +130,43 @@ PlatformWriteFile_t(PlatformWriteFile)
 
 	return true;
 }
+
+internal void poll_gamepads(void)
+{
+	FOR_RANGE(i, min(PLATFORM_GAMEPAD_MAX, XUSER_MAX_COUNT))
+	{
+		XINPUT_STATE gamepad_state;
+		if (g_XInputGetState(static_cast<DWORD>(i), &gamepad_state) == ERROR_SUCCESS)
+		{
+			PROCESS_PLATFORM_BUTTON(.gamepads[i].action_left,    (gamepad_state.Gamepad.wButtons & XINPUT_GAMEPAD_X             ) != 0);
+			PROCESS_PLATFORM_BUTTON(.gamepads[i].action_right,   (gamepad_state.Gamepad.wButtons & XINPUT_GAMEPAD_B             ) != 0);
+			PROCESS_PLATFORM_BUTTON(.gamepads[i].action_down,    (gamepad_state.Gamepad.wButtons & XINPUT_GAMEPAD_A             ) != 0);
+			PROCESS_PLATFORM_BUTTON(.gamepads[i].action_up,      (gamepad_state.Gamepad.wButtons & XINPUT_GAMEPAD_Y             ) != 0);
+			PROCESS_PLATFORM_BUTTON(.gamepads[i].dpad_up,        (gamepad_state.Gamepad.wButtons & XINPUT_GAMEPAD_DPAD_UP       ) != 0);
+			PROCESS_PLATFORM_BUTTON(.gamepads[i].dpad_down,      (gamepad_state.Gamepad.wButtons & XINPUT_GAMEPAD_DPAD_DOWN     ) != 0);
+			PROCESS_PLATFORM_BUTTON(.gamepads[i].dpad_left,      (gamepad_state.Gamepad.wButtons & XINPUT_GAMEPAD_DPAD_LEFT     ) != 0);
+			PROCESS_PLATFORM_BUTTON(.gamepads[i].dpad_right,     (gamepad_state.Gamepad.wButtons & XINPUT_GAMEPAD_DPAD_RIGHT    ) != 0);
+			PROCESS_PLATFORM_BUTTON(.gamepads[i].shoulder_left,  (gamepad_state.Gamepad.wButtons & XINPUT_GAMEPAD_LEFT_SHOULDER ) != 0);
+			PROCESS_PLATFORM_BUTTON(.gamepads[i].shoulder_right, (gamepad_state.Gamepad.wButtons & XINPUT_GAMEPAD_RIGHT_SHOULDER) != 0);
+			PROCESS_PLATFORM_BUTTON(.gamepads[i].stick_left,     (gamepad_state.Gamepad.wButtons & XINPUT_GAMEPAD_LEFT_THUMB    ) != 0);
+			PROCESS_PLATFORM_BUTTON(.gamepads[i].stick_right,    (gamepad_state.Gamepad.wButtons & XINPUT_GAMEPAD_RIGHT_THUMB   ) != 0);
+			PROCESS_PLATFORM_BUTTON(.gamepads[i].start,          (gamepad_state.Gamepad.wButtons & XINPUT_GAMEPAD_START         ) != 0);
+			PROCESS_PLATFORM_BUTTON(.gamepads[i].back,           (gamepad_state.Gamepad.wButtons & XINPUT_GAMEPAD_BACK          ) != 0);
+
+			g_platform_input.gamepads[i].trigger_left  = gamepad_state.Gamepad.bLeftTrigger  / 255.0f;
+			g_platform_input.gamepads[i].trigger_right = gamepad_state.Gamepad.bRightTrigger / 255.0f;
+
+			// @TODO@ Better deadzoning.
+			constexpr f32 DEADZONE_MIN = 0.075f;
+			constexpr f32 DEADZONE_MAX = 0.8f;
+			g_platform_input.gamepads[i].stick_left.x  = sign(gamepad_state.Gamepad.sThumbLX) * clamp((fabsf(gamepad_state.Gamepad.sThumbLX / 32768.0f) - DEADZONE_MIN) / (DEADZONE_MAX - DEADZONE_MIN), 0.0f, 1.0f);
+			g_platform_input.gamepads[i].stick_left.y  = sign(gamepad_state.Gamepad.sThumbLY) * clamp((fabsf(gamepad_state.Gamepad.sThumbLY / 32768.0f) - DEADZONE_MIN) / (DEADZONE_MAX - DEADZONE_MIN), 0.0f, 1.0f);
+			g_platform_input.gamepads[i].stick_right.x = sign(gamepad_state.Gamepad.sThumbRX) * clamp((fabsf(gamepad_state.Gamepad.sThumbRX / 32768.0f) - DEADZONE_MIN) / (DEADZONE_MAX - DEADZONE_MIN), 0.0f, 1.0f);
+			g_platform_input.gamepads[i].stick_right.y = sign(gamepad_state.Gamepad.sThumbRY) * clamp((fabsf(gamepad_state.Gamepad.sThumbRY / 32768.0f) - DEADZONE_MIN) / (DEADZONE_MAX - DEADZONE_MIN), 0.0f, 1.0f);
+		}
+	}
+}
+
 
 internal LRESULT window_procedure_callback(HWND window, UINT message, WPARAM wparam, LPARAM lparam)
 {
@@ -349,8 +384,10 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int cmd_show)
 	}
 
 	//
-	// Loop.
+	// Miscellaneous initializations.
 	//
+
+	bool32 is_sleep_granular = timeBeginPeriod(1) == TIMERR_NOERROR;
 
 	constexpr BITMAPINFO BACKBUFFER_BITMAP_INFO =
 		{
@@ -366,19 +403,36 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int cmd_show)
 		};
 
 	byte* backbuffer_bitmap_data = reinterpret_cast<byte*>(VirtualAlloc(0, static_cast<size_t>(4) * BACKBUFFER_BITMAP_INFO.bmiHeader.biWidth * -BACKBUFFER_BITMAP_INFO.bmiHeader.biHeight, MEM_COMMIT, PAGE_READWRITE));
-	byte* platform_memory        = reinterpret_cast<byte*>(VirtualAlloc(0, PLATFORM_MEMORY_SIZE, MEM_COMMIT, PAGE_READWRITE));
+	byte* platform_memory        =
+		#if DEBUG
+		reinterpret_cast<byte*>(VirtualAlloc(reinterpret_cast<void*>(TEBIBYTES_OF(8)), PLATFORM_MEMORY_SIZE, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE));
+		#else
+		reinterpret_cast<byte*>(VirtualAlloc(0, PLATFORM_MEMORY_SIZE, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE));
+		#endif
+
 	ASSERT(backbuffer_bitmap_data);
 	ASSERT(platform_memory);
 
-	u32 curr_sample_index = 0;
 
-	f64 frame_time    = 0.0;
-	i64 counter_start = query_performance_counter();
+	#if DEBUG
+	HMODULE handmade_ralph_dll = LoadLibraryW(EXE_DIR L"HandmadeRalph.dll");
+	DEFER { CloseHandle(handmade_ralph_dll); };
+
+	PlatformUpdate_t* l_PlatformUpdate = reinterpret_cast<PlatformUpdate_t*>(GetProcAddress(handmade_ralph_dll, "PlatformUpdate"));
+	PlatformSound_t*  l_PlatformSound  = reinterpret_cast<PlatformSound_t *>(GetProcAddress(handmade_ralph_dll, "PlatformSound"));
+	#endif
+
+	constexpr f32 SECONDS_PER_UPDATE = 1.0f / 30.0f;
+
+	u32 curr_sample_index = 0;
+	i64 performance_counter_start;
 	while (true)
 	{
-		i64 counter_end = query_performance_counter();
-		f64 delta_time  = calc_performance_counter_delta_time(counter_start, counter_end);
-		counter_start = counter_end;
+		performance_counter_start = query_performance_counter();
+
+		//
+		// Input.
+		//
 
 		for (MSG message; PeekMessageW(&message, 0, 0, 0, PM_REMOVE);)
 		{
@@ -392,32 +446,11 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int cmd_show)
 			}
 		}
 
-		FOR_RANGE(i, XUSER_MAX_COUNT)
-		{
-			XINPUT_STATE gamepad_state;
-			if (g_XInputGetState(static_cast<DWORD>(i), &gamepad_state) == ERROR_SUCCESS)
-			{
-				PROCESS_PLATFORM_BUTTON(.gamepads[i].action_left,    (gamepad_state.Gamepad.wButtons & XINPUT_GAMEPAD_X             ) != 0);
-				PROCESS_PLATFORM_BUTTON(.gamepads[i].action_right,   (gamepad_state.Gamepad.wButtons & XINPUT_GAMEPAD_B             ) != 0);
-				PROCESS_PLATFORM_BUTTON(.gamepads[i].action_down,    (gamepad_state.Gamepad.wButtons & XINPUT_GAMEPAD_A             ) != 0);
-				PROCESS_PLATFORM_BUTTON(.gamepads[i].action_up,      (gamepad_state.Gamepad.wButtons & XINPUT_GAMEPAD_Y             ) != 0);
-				PROCESS_PLATFORM_BUTTON(.gamepads[i].dpad_up,        (gamepad_state.Gamepad.wButtons & XINPUT_GAMEPAD_DPAD_UP       ) != 0);
-				PROCESS_PLATFORM_BUTTON(.gamepads[i].dpad_down,      (gamepad_state.Gamepad.wButtons & XINPUT_GAMEPAD_DPAD_DOWN     ) != 0);
-				PROCESS_PLATFORM_BUTTON(.gamepads[i].dpad_left,      (gamepad_state.Gamepad.wButtons & XINPUT_GAMEPAD_DPAD_LEFT     ) != 0);
-				PROCESS_PLATFORM_BUTTON(.gamepads[i].dpad_right,     (gamepad_state.Gamepad.wButtons & XINPUT_GAMEPAD_DPAD_RIGHT    ) != 0);
-				PROCESS_PLATFORM_BUTTON(.gamepads[i].shoulder_left,  (gamepad_state.Gamepad.wButtons & XINPUT_GAMEPAD_LEFT_SHOULDER ) != 0);
-				PROCESS_PLATFORM_BUTTON(.gamepads[i].shoulder_right, (gamepad_state.Gamepad.wButtons & XINPUT_GAMEPAD_RIGHT_SHOULDER) != 0);
-				PROCESS_PLATFORM_BUTTON(.gamepads[i].stick_left,     (gamepad_state.Gamepad.wButtons & XINPUT_GAMEPAD_LEFT_THUMB    ) != 0);
-				PROCESS_PLATFORM_BUTTON(.gamepads[i].stick_right,    (gamepad_state.Gamepad.wButtons & XINPUT_GAMEPAD_RIGHT_THUMB   ) != 0);
-				PROCESS_PLATFORM_BUTTON(.gamepads[i].start,          (gamepad_state.Gamepad.wButtons & XINPUT_GAMEPAD_START         ) != 0);
-				PROCESS_PLATFORM_BUTTON(.gamepads[i].back,           (gamepad_state.Gamepad.wButtons & XINPUT_GAMEPAD_BACK          ) != 0);
+		poll_gamepads();
 
-				g_platform_input.gamepads[i].trigger_left  = gamepad_state.Gamepad.bLeftTrigger  / 255.0f;
-				g_platform_input.gamepads[i].trigger_right = gamepad_state.Gamepad.bRightTrigger / 255.0f;
-				g_platform_input.gamepads[i].stick_left    = vi2 { gamepad_state.Gamepad.sThumbLX, gamepad_state.Gamepad.sThumbLY } / 32768.0f;
-				g_platform_input.gamepads[i].stick_right   = vi2 { gamepad_state.Gamepad.sThumbRX, gamepad_state.Gamepad.sThumbRY } / 32768.0f;
-			}
-		}
+		//
+		// Update.
+		//
 
 		PlatformFramebuffer platform_framebuffer =
 			{
@@ -425,19 +458,56 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int cmd_show)
 				.pixels     = reinterpret_cast<u32*>(backbuffer_bitmap_data)
 			};
 
-		frame_time += delta_time;
+		l_PlatformUpdate(&platform_framebuffer, &g_platform_input, platform_memory, SECONDS_PER_UPDATE, PlatformReadFile, PlatformFreeFile, PlatformWriteFile);
 
-		constexpr f64 SECONDS_PER_UPDATE = 1.0 / 60.0;
-		if (frame_time >= SECONDS_PER_UPDATE)
+		//
+		// Sound.
+		//
+
+		DWORD play_offset;
+		DWORD write_offset;
+		if (directsound_buffer->GetCurrentPosition(&play_offset, &write_offset) == DS_OK)
 		{
-			frame_time -= SECONDS_PER_UPDATE;
+			constexpr DWORD SOUND_LATENCY = SAMPLES_PER_SECOND / 15 * SAMPLE_SIZE; // @TODO@ Better latency.
 
-			PlatformUpdate(&platform_framebuffer, &g_platform_input, platform_memory, PlatformReadFile, PlatformFreeFile, PlatformWriteFile);
-
-			FOR_ELEMS(g_platform_input.buttons)
+			DWORD target_offset = (play_offset + SOUND_LATENCY) % SOUND_BUFFER_SIZE;
+			DWORD sample_offset = curr_sample_index * SAMPLE_SIZE % SOUND_BUFFER_SIZE;
+			DWORD write_size    = target_offset - sample_offset;
+			if (target_offset < sample_offset)
 			{
-				*it &= 0b10000000;
+				write_size = SOUND_BUFFER_SIZE + write_size;
 			}
+
+			byte* region_0;
+			DWORD region_size_0;
+			byte* region_1;
+			DWORD region_size_1;
+			if (directsound_buffer->Lock(sample_offset, write_size, reinterpret_cast<void**>(&region_0), &region_size_0, reinterpret_cast<void**>(&region_1), &region_size_1, 0) == DS_OK)
+			{
+				ASSERT(region_size_0 % SAMPLE_SIZE == 0);
+				FOR_ELEMS(sample, reinterpret_cast<u32*>(region_0), static_cast<i32>(region_size_0 / SAMPLE_SIZE))
+				{
+					*sample = l_PlatformSound(SAMPLES_PER_SECOND, platform_memory).sample;
+				}
+
+				ASSERT(region_size_1 % SAMPLE_SIZE == 0);
+				FOR_ELEMS(sample, reinterpret_cast<u32*>(region_1), static_cast<i32>(region_size_1 / SAMPLE_SIZE))
+				{
+					*sample = l_PlatformSound(SAMPLES_PER_SECOND, platform_memory).sample;
+				}
+
+				curr_sample_index += static_cast<i32>(region_size_0 / SAMPLE_SIZE) + static_cast<i32>(region_size_1 / SAMPLE_SIZE);
+				directsound_buffer->Unlock(region_0, region_size_0, region_1, region_size_1);
+			}
+		}
+
+		//
+		// Flip and wait.
+		//
+
+		FOR_ELEMS(g_platform_input.buttons)
+		{
+			*it &= 0b10000000;
 		}
 
 		{
@@ -461,43 +531,34 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int cmd_show)
 			ReleaseDC(window, device_context);
 		}
 
+		// @TODO@ Remove spinlock.
+		// @TODO@ Gamepad polls are done after a sleep...
+		f32 computation_time = calc_performance_counter_delta_time(performance_counter_start, query_performance_counter());
+		if (computation_time < SECONDS_PER_UPDATE)
 		{
-			DWORD play_offset;
-			DWORD write_offset;
-			if (directsound_buffer->GetCurrentPosition(&play_offset, &write_offset) == DS_OK)
+			if (is_sleep_granular)
 			{
-				constexpr DWORD SOUND_LATENCY = SAMPLES_PER_SECOND / 15 * SAMPLE_SIZE; // @TODO@ Better latency.
-
-				DWORD target_offset = (play_offset + SOUND_LATENCY) % SOUND_BUFFER_SIZE;
-				DWORD sample_offset = curr_sample_index * SAMPLE_SIZE % SOUND_BUFFER_SIZE;
-				DWORD write_size    = target_offset - sample_offset;
-				if (target_offset < sample_offset)
+				while (SECONDS_PER_UPDATE - computation_time > 0.04f)
 				{
-					write_size = SOUND_BUFFER_SIZE + write_size;
-				}
+					Sleep(1);
+					poll_gamepads();
 
-				byte* region_0;
-				DWORD region_size_0;
-				byte* region_1;
-				DWORD region_size_1;
-				if (directsound_buffer->Lock(sample_offset, write_size, reinterpret_cast<void**>(&region_0), &region_size_0, reinterpret_cast<void**>(&region_1), &region_size_1, 0) == DS_OK)
-				{
-					ASSERT(region_size_0 % SAMPLE_SIZE == 0);
-					FOR_ELEMS(sample, reinterpret_cast<u32*>(region_0), static_cast<i32>(region_size_0 / SAMPLE_SIZE))
+					computation_time = calc_performance_counter_delta_time(performance_counter_start, query_performance_counter());
+					if (computation_time >= SECONDS_PER_UPDATE)
 					{
-						*sample = PlatformSound(SAMPLES_PER_SECOND, platform_memory).sample;
+						DEBUG_printf("HandmadeRalph_win32 :: Missed frame from sleeping.\n");
 					}
-
-					ASSERT(region_size_1 % SAMPLE_SIZE == 0);
-					FOR_ELEMS(sample, reinterpret_cast<u32*>(region_1), static_cast<i32>(region_size_1 / SAMPLE_SIZE))
-					{
-						*sample = PlatformSound(SAMPLES_PER_SECOND, platform_memory).sample;
-					}
-
-					curr_sample_index += static_cast<i32>(region_size_0 / SAMPLE_SIZE) + static_cast<i32>(region_size_1 / SAMPLE_SIZE);
-					directsound_buffer->Unlock(region_0, region_size_0, region_1, region_size_1);
 				}
 			}
+
+			while (computation_time < SECONDS_PER_UPDATE)
+			{
+				computation_time = calc_performance_counter_delta_time(performance_counter_start, query_performance_counter());
+			}
+		}
+		else
+		{
+			DEBUG_printf("HandmadeRalph_win32 :: Missed frame from computing.\n");
 		}
 	}
 }
