@@ -2,7 +2,6 @@
 
 #include <stdint.h>
 typedef uint8_t     byte;
-typedef uint64_t    memsize;
 typedef const char* strlit;
 typedef int8_t      i8;
 typedef int16_t     i16;
@@ -232,18 +231,18 @@ internal void push_entire_node(TYPE* head, TYPE** node)
 //
 
 #define memory_arena_checkpoint(ARENA)\
-memsize MACRO_CONCAT_(MEMORY_ARENA_CHECKPOINT_, __LINE__) = (ARENA)->used;\
+u64 MACRO_CONCAT_(MEMORY_ARENA_CHECKPOINT_, __LINE__) = (ARENA)->used;\
 DEFER { (ARENA)->used = MACRO_CONCAT_(MEMORY_ARENA_CHECKPOINT_, __LINE__); }
 
 struct MemoryArena
 {
-	memsize size;
-	byte*   base;
-	memsize used;
+	u64   used;
+	u64   size;
+	byte* base;
 };
 
 template <typename TYPE>
-internal TYPE* memory_arena_allocate(MemoryArena* arena, const memsize& count = 1)
+internal TYPE* memory_arena_allocate(MemoryArena* arena, const u64& count = 1)
 {
 	ASSERT(arena->used + sizeof(TYPE) * count <= arena->size);
 	byte* allocation = arena->base + arena->used;
@@ -252,7 +251,7 @@ internal TYPE* memory_arena_allocate(MemoryArena* arena, const memsize& count = 
 }
 
 template <typename TYPE>
-internal TYPE* memory_arena_allocate_zero(MemoryArena* arena, const memsize& count = 1)
+internal TYPE* memory_arena_allocate_zero(MemoryArena* arena, const u64& count = 1)
 {
 	ASSERT(arena->used + sizeof(TYPE) * count <= arena->size);
 	byte* allocation = arena->base + arena->used;
@@ -261,7 +260,7 @@ internal TYPE* memory_arena_allocate_zero(MemoryArena* arena, const memsize& cou
 	return reinterpret_cast<TYPE*>(allocation);
 }
 
-internal MemoryArena memory_arena_reserve(MemoryArena* arena, const memsize& size)
+internal MemoryArena memory_arena_reserve(MemoryArena* arena, const u64& size)
 {
 	ASSERT(arena->used + size <= arena->size);
 	MemoryArena reservation;
@@ -607,34 +606,3 @@ internal __m128 square(const __m128& x                                  ) { retu
 internal __m128 cube  (const __m128& x                                  ) { return _mm_mul_ps(_mm_mul_ps(x, x), x); }
 internal __m128 lerp  (const __m128& a, const __m128& b, const __m128& t) { return _mm_add_ps(_mm_mul_ps(a, _mm_sub_ps(m_1, t)), _mm_mul_ps(b, t)); }
 internal __m128 clamp (const __m128& x, const __m128& a, const __m128& b) { return _mm_min_ps(_mm_max_ps(x, a), b); }
-
-//
-// String.
-//
-
-#define PASS_STRING_VIEW(STRING) (STRING).size, (STRING).data
-#define STRING_VIEW_OF(STRLIT)   (StringView { sizeof(STRLIT) - 1, (STRLIT) })
-
-struct StringView
-{
-	memsize     size;
-	const char* data;
-};
-
-internal constexpr bool32 is_alpha(const char& c)
-{
-	return IN_RANGE(c, 'a', 'z' + 1) || IN_RANGE(c, 'A', 'Z' + 1);
-}
-
-internal constexpr bool32 is_digit(const char& c)
-{
-	return IN_RANGE(c, '0', '9' + 1);
-}
-
-internal constexpr bool32 operator==(const StringView& a, const StringView& b) { return a.size == b.size && memcmp(a.data, b.data, a.size) == 0; }
-internal constexpr bool32 operator!=(const StringView& a, const StringView& b) { return !(a == b); }
-
-internal constexpr bool32 starts_with(const StringView& prefix, const StringView& string)
-{
-	return string.size >= prefix.size && StringView { prefix.size, string.data } == prefix;
-}

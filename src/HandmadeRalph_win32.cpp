@@ -43,6 +43,96 @@ internal f64 calc_performance_counter_delta_time(i64 start, i64 end)
 	return static_cast<f64>(end - start) / g_performance_counter_frequency;
 }
 
+PlatformReadFile_t(PlatformReadFile)
+{
+	HANDLE handle = CreateFileW(platform_file_path, GENERIC_READ, FILE_SHARE_READ, 0, OPEN_EXISTING, 0, 0);
+	if (handle == INVALID_HANDLE_VALUE)
+	{
+		DEBUG_printf("PlatformReadFile :: Couldn't open file `%S` for reading.\n", platform_file_path);
+		return false;
+	}
+	DEFER { CloseHandle(handle); };
+
+	LARGE_INTEGER file_size;
+	if (!GetFileSizeEx(handle, &file_size))
+	{
+		DEBUG_printf("PlatformReadFile :: Couldn't get size of `%S`.\n", platform_file_path);
+		return false;
+	}
+
+	platform_file->size = static_cast<u64>(file_size.QuadPart),
+	platform_file->data = reinterpret_cast<byte*>(VirtualAlloc(0, platform_file->size, MEM_COMMIT, PAGE_READWRITE));
+
+	// @TODO@ Larger file sizes.
+	if (platform_file->size > 0xFFFFFFFF)
+	{
+		DEBUG_printf("PlatformReadFile :: File `%S` is too big (`%zu` bytes); must be less than 2^32 bytes (4.29GB).\n", platform_file_path, platform_file->size);
+		return false;
+	}
+
+	if (!platform_file->data)
+	{
+		DEBUG_printf("PlatformReadFile :: Couldn't allocate `%zu` bytes for `%S`.\n", platform_file->size, platform_file_path);
+		return false;
+	}
+
+	DWORD read_size;
+	if (!ReadFile(handle, platform_file->data, static_cast<u32>(platform_file->size), &read_size, 0))
+	{
+		DEBUG_printf("PlatformReadFile :: Couldn't read file `%S`.\n", platform_file_path);
+		VirtualFree(platform_file->data, 0, MEM_RELEASE);
+		return false;
+	}
+
+	if (read_size != platform_file->size)
+	{
+		DEBUG_printf("PlatformReadFile :: Incomplete read of `%ld` out of `%zu` bytes of `%S`.\n", read_size, platform_file->size, platform_file_path);
+		VirtualFree(platform_file->data, 0, MEM_RELEASE);
+		return false;
+	}
+
+	return true;
+}
+
+PlatformFreeFile_t(PlatformFreeFile)
+{
+	ASSERT(platform_file->data);
+	VirtualFree(platform_file->data, 0, MEM_RELEASE);
+}
+
+PlatformWriteFile_t(PlatformWriteFile)
+{
+	HANDLE handle = CreateFileW(platform_file_path, GENERIC_WRITE, 0, 0, CREATE_ALWAYS, 0, 0);
+	if (handle == INVALID_HANDLE_VALUE)
+	{
+		DEBUG_printf("PlatformWriteFile :: Couldn't open file `%S` for writing.\n", platform_file_path);
+		return false;
+	}
+	DEFER { CloseHandle(handle); };
+
+	// @TODO@ Larger file sizes.
+	if (platform_size > 0xFFFFFFFF)
+	{
+		DEBUG_printf("PlatformWriteFile :: `%zu` bytes is too big to write out to `%S`; must be less than 2^32 bytes (4.29GB).\n", platform_size, platform_file_path);
+		return false;
+	}
+
+	DWORD write_size;
+	if (!WriteFile(handle, platform_data, static_cast<u32>(platform_size), &write_size, 0))
+	{
+		DEBUG_printf("PlatformWriteFile :: Couldn't write into `%S`.\n", platform_file_path);
+		return false;
+	}
+
+	if (write_size != platform_size)
+	{
+		DEBUG_printf("PlatformWriteSize :: Incomplete write of `%ld` out of `%zu` bytes to `%S`.\n", write_size, platform_size, platform_file_path);
+		return false;
+	}
+
+	return true;
+}
+
 internal LRESULT window_procedure_callback(HWND window, UINT message, WPARAM wparam, LPARAM lparam)
 {
 	switch (message)
@@ -160,11 +250,11 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int cmd_show)
 		HMODULE xinput_dll = LoadLibraryW(L"xinput1_4.dll");
 		if (!xinput_dll)
 		{
-			DEBUG_printf("XInput:: Could not load `xinput1_4.dll`.\n");
+			DEBUG_printf("XInput :: Could not load `xinput1_4.dll`.\n");
 			xinput_dll = LoadLibraryW(L"xinput1_3.dll");
 			if (!xinput_dll)
 			{
-				DEBUG_printf("XInput:: Could not load `xinput1_3.dll`.\n");
+				DEBUG_printf("XInput :: Could not load `xinput1_3.dll`.\n");
 			}
 		}
 		if (xinput_dll)
@@ -342,7 +432,7 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int cmd_show)
 		{
 			frame_time -= SECONDS_PER_UPDATE;
 
-			PlatformUpdate(&platform_framebuffer, &g_platform_input, platform_memory);
+			PlatformUpdate(&platform_framebuffer, &g_platform_input, platform_memory, PlatformReadFile, PlatformFreeFile, PlatformWriteFile);
 
 			FOR_ELEMS(g_platform_input.buttons)
 			{
