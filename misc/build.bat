@@ -15,8 +15,11 @@ pushd W:\build\
 		echo Release build
 	) else (
 		echo Debug build
-		cl /nologo /DDATA_DIR="\"W:/data/\"" /DEXE_DIR="\"W:/build/\"" /DSRC_DIR="\"W:/src/\"" /std:c++20 /Od /Oi /DDEBUG=1 /Z7 /MTd /GR- /EHsc /EHa- %DEBUG_WARNINGS% /permissive- /LD                  W:\src\HandmadeRalph.cpp       /link %LIBRARIES% /debug:FULL /opt:ref /incremental:no /export:PlatformUpdate /export:PlatformSound
-		cl /nologo /DDATA_DIR="\"W:/data/\"" /DEXE_DIR="\"W:/build/\"" /DSRC_DIR="\"W:/src/\"" /std:c++20 /Od /Oi /DDEBUG=1 /Z7 /MTd /GR- /EHsc /EHa- %DEBUG_WARNINGS% /permissive- /FeHandmadeRalph.exe W:\src\HandmadeRalph_win32.cpp /link %LIBRARIES% /debug:FULL /opt:ref /incremental:no /subsystem:windows
+		echo "" > LOCK.temp
+		del *.pdb > NUL 2> NUL
+		cl /nologo /DDATA_DIR="\"W:/data/\"" /DEXE_DIR="\"W:/build/\"" /DSRC_DIR="\"W:/src/\""                                           /std:c++20 /Od /Oi /DDEBUG=1 /Z7 /MTd /GR- /EHsc /EHa- %DEBUG_WARNINGS% /permissive- /LD                  W:\src\HandmadeRalph.cpp       /link %LIBRARIES% /debug:FULL /opt:ref /incremental:no /export:PlatformUpdate /export:PlatformSound
+		cl /nologo /DDATA_DIR="\"W:/data/\"" /DEXE_DIR="\"W:/build/\"" /DSRC_DIR="\"W:/src/\"" /DLOCK_FILE_PATH="\"W:/build/LOCK.temp\"" /std:c++20 /Od /Oi /DDEBUG=1 /Z7 /MTd /GR- /EHsc /EHa- %DEBUG_WARNINGS% /permissive- /FeHandmadeRalph.exe W:\src\HandmadeRalph_win32.cpp /link %LIBRARIES% /debug:FULL /opt:ref /incremental:no /subsystem:windows
+		del LOCK.temp
 	)
 popd
 

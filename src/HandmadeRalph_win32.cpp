@@ -9,7 +9,7 @@
 #include "unified.h"
 #include "platform.h"
 
-#define PROCESS_PLATFORM_BUTTON(BUTTON, IS_DOWN) MACRO_CONCAT_(g_platform_input.button, BUTTON) = static_cast<u8>(((MACRO_CONCAT_(g_platform_input.button, BUTTON) + ((MACRO_CONCAT_(g_platform_input.button, BUTTON) >> 7) != (IS_DOWN))) & 0b01111111) | ((IS_DOWN) << 7))
+#define PROCESS_PLATFORM_BUTTON(BUTTON, IS_DOWN) MACRO_CONCAT(g_platform_input.button, BUTTON) = static_cast<u8>(((MACRO_CONCAT(g_platform_input.button, BUTTON) + ((MACRO_CONCAT(g_platform_input.button, BUTTON) >> 7) != (IS_DOWN))) & 0b01111111) | ((IS_DOWN) << 7))
 
 #define  XInputGetState_t(NAME) DWORD NAME(DWORD dwUserIndex, XINPUT_STATE *pState)
 typedef  XInputGetState_t(XInputGetState_t);
@@ -29,24 +29,58 @@ global i64           g_performance_counter_frequency =
 		return n.QuadPart;
 	}();
 
-internal i64 query_performance_counter(void)
-{
-	LARGE_INTEGER n;
-	QueryPerformanceCounter(&n);
-	return n.QuadPart;
-}
+#if DEBUG
+#define HANDMADE_RALPH_DLL_FILE_PATH      EXE_DIR L"HandmadeRalph.dll"
+#define HANDMADE_RALPH_DLL_FILE_PATH_TEMP HANDMADE_RALPH_DLL_FILE_PATH ".temp"
 
-internal f32 calc_performance_counter_delta_time(i64 start, i64 end)
+struct HandmadeRalphDLL
 {
-	return static_cast<f32>(end - start) / g_performance_counter_frequency;
+	HMODULE           handle;
+	FILETIME          write_time;
+	PlatformUpdate_t* PlatformUpdate;
+	PlatformSound_t*  PlatformSound;
+};
+
+internal HandmadeRalphDLL DEBUG_load_handmade_ralph_dll(void)
+{
+	if (!CopyFileW(HANDMADE_RALPH_DLL_FILE_PATH, HANDMADE_RALPH_DLL_FILE_PATH_TEMP, false))
+	{
+		ASSERT(false);
+		return {};
+	}
+
+	WIN32_FILE_ATTRIBUTE_DATA dll_attribute_data;
+	if (!GetFileAttributesExW(HANDMADE_RALPH_DLL_FILE_PATH, GetFileExInfoStandard, &dll_attribute_data))
+	{
+		ASSERT(false);
+		return {};
+	}
+
+	HandmadeRalphDLL dll =
+		{
+			.handle         = LoadLibraryW(HANDMADE_RALPH_DLL_FILE_PATH_TEMP),
+			.write_time     = dll_attribute_data.ftLastWriteTime,
+			.PlatformUpdate = reinterpret_cast<PlatformUpdate_t*>(GetProcAddress(dll.handle, "PlatformUpdate")),
+			.PlatformSound  = reinterpret_cast<PlatformSound_t *>(GetProcAddress(dll.handle, "PlatformSound"))
+		};
+
+
+	ASSERT(dll.handle);
+	ASSERT(dll.PlatformUpdate);
+	ASSERT(dll.PlatformSound);
+
+	DEBUG_printf(__FUNCTION__ " :: Hotloaded.\n");
+
+	return dll;
 }
+#endif
 
 PlatformReadFile_t(PlatformReadFile)
 {
 	HANDLE handle = CreateFileW(platform_file_path, GENERIC_READ, FILE_SHARE_READ, 0, OPEN_EXISTING, 0, 0);
 	if (handle == INVALID_HANDLE_VALUE)
 	{
-		DEBUG_printf("PlatformReadFile :: Couldn't open file `%S` for reading.\n", platform_file_path);
+		DEBUG_printf(__FUNCTION__ " :: Couldn't open file `%S` for reading.\n", platform_file_path);
 		return false;
 	}
 	DEFER { CloseHandle(handle); };
@@ -54,7 +88,7 @@ PlatformReadFile_t(PlatformReadFile)
 	LARGE_INTEGER file_size;
 	if (!GetFileSizeEx(handle, &file_size))
 	{
-		DEBUG_printf("PlatformReadFile :: Couldn't get size of `%S`.\n", platform_file_path);
+		DEBUG_printf(__FUNCTION__ " :: Couldn't get size of `%S`.\n", platform_file_path);
 		return false;
 	}
 
@@ -64,27 +98,27 @@ PlatformReadFile_t(PlatformReadFile)
 	// @TODO@ Larger file sizes.
 	if (platform_file->size > 0xFFFFFFFF)
 	{
-		DEBUG_printf("PlatformReadFile :: File `%S` is too big (`%zu` bytes); must be less than 2^32 bytes (4.29GB).\n", platform_file_path, platform_file->size);
+		DEBUG_printf(__FUNCTION__ " :: File `%S` is too big (`%zu` bytes); must be less than 2^32 bytes (4.29GB).\n", platform_file_path, platform_file->size);
 		return false;
 	}
 
 	if (!platform_file->data)
 	{
-		DEBUG_printf("PlatformReadFile :: Couldn't allocate `%zu` bytes for `%S`.\n", platform_file->size, platform_file_path);
+		DEBUG_printf(__FUNCTION__ " :: Couldn't allocate `%zu` bytes for `%S`.\n", platform_file->size, platform_file_path);
 		return false;
 	}
 
 	DWORD read_size;
 	if (!ReadFile(handle, platform_file->data, static_cast<u32>(platform_file->size), &read_size, 0))
 	{
-		DEBUG_printf("PlatformReadFile :: Couldn't read file `%S`.\n", platform_file_path);
+		DEBUG_printf(__FUNCTION__ " :: Couldn't read file `%S`.\n", platform_file_path);
 		VirtualFree(platform_file->data, 0, MEM_RELEASE);
 		return false;
 	}
 
 	if (read_size != platform_file->size)
 	{
-		DEBUG_printf("PlatformReadFile :: Incomplete read of `%ld` out of `%zu` bytes of `%S`.\n", read_size, platform_file->size, platform_file_path);
+		DEBUG_printf(__FUNCTION__ " :: Incomplete read of `%ld` out of `%zu` bytes of `%S`.\n", read_size, platform_file->size, platform_file_path);
 		VirtualFree(platform_file->data, 0, MEM_RELEASE);
 		return false;
 	}
@@ -103,7 +137,7 @@ PlatformWriteFile_t(PlatformWriteFile)
 	HANDLE handle = CreateFileW(platform_file_path, GENERIC_WRITE, 0, 0, CREATE_ALWAYS, 0, 0);
 	if (handle == INVALID_HANDLE_VALUE)
 	{
-		DEBUG_printf("PlatformWriteFile :: Couldn't open file `%S` for writing.\n", platform_file_path);
+		DEBUG_printf(__FUNCTION__ " :: Couldn't open file `%S` for writing.\n", platform_file_path);
 		return false;
 	}
 	DEFER { CloseHandle(handle); };
@@ -111,24 +145,36 @@ PlatformWriteFile_t(PlatformWriteFile)
 	// @TODO@ Larger file sizes.
 	if (platform_size > 0xFFFFFFFF)
 	{
-		DEBUG_printf("PlatformWriteFile :: `%zu` bytes is too big to write out to `%S`; must be less than 2^32 bytes (4.29GB).\n", platform_size, platform_file_path);
+		DEBUG_printf(__FUNCTION__ " :: `%zu` bytes is too big to write out to `%S`; must be less than 2^32 bytes (4.29GB).\n", platform_size, platform_file_path);
 		return false;
 	}
 
 	DWORD write_size;
 	if (!WriteFile(handle, platform_data, static_cast<u32>(platform_size), &write_size, 0))
 	{
-		DEBUG_printf("PlatformWriteFile :: Couldn't write into `%S`.\n", platform_file_path);
+		DEBUG_printf(__FUNCTION__ " :: Couldn't write into `%S`.\n", platform_file_path);
 		return false;
 	}
 
 	if (write_size != platform_size)
 	{
-		DEBUG_printf("PlatformWriteSize :: Incomplete write of `%ld` out of `%zu` bytes to `%S`.\n", write_size, platform_size, platform_file_path);
+		DEBUG_printf(__FUNCTION__ " :: Incomplete write of `%ld` out of `%zu` bytes to `%S`.\n", write_size, platform_size, platform_file_path);
 		return false;
 	}
 
 	return true;
+}
+
+internal i64 query_performance_counter(void)
+{
+	LARGE_INTEGER n;
+	QueryPerformanceCounter(&n);
+	return n.QuadPart;
+}
+
+internal f32 calc_performance_counter_delta_time(i64 start, i64 end)
+{
+	return static_cast<f32>(end - start) / g_performance_counter_frequency;
 }
 
 internal void poll_gamepads(void)
@@ -166,7 +212,6 @@ internal void poll_gamepads(void)
 		}
 	}
 }
-
 
 internal LRESULT window_procedure_callback(HWND window, UINT message, WPARAM wparam, LPARAM lparam)
 {
@@ -413,14 +458,7 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int cmd_show)
 	ASSERT(backbuffer_bitmap_data);
 	ASSERT(platform_memory);
 
-
-	#if DEBUG
-	HMODULE handmade_ralph_dll = LoadLibraryW(EXE_DIR L"HandmadeRalph.dll");
-	DEFER { CloseHandle(handmade_ralph_dll); };
-
-	PlatformUpdate_t* l_PlatformUpdate = reinterpret_cast<PlatformUpdate_t*>(GetProcAddress(handmade_ralph_dll, "PlatformUpdate"));
-	PlatformSound_t*  l_PlatformSound  = reinterpret_cast<PlatformSound_t *>(GetProcAddress(handmade_ralph_dll, "PlatformSound"));
-	#endif
+	HandmadeRalphDLL handmade_ralph_dll = DEBUG_load_handmade_ralph_dll();
 
 	constexpr f32 SECONDS_PER_UPDATE = 1.0f / 30.0f;
 
@@ -458,7 +496,7 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int cmd_show)
 				.pixels     = reinterpret_cast<u32*>(backbuffer_bitmap_data)
 			};
 
-		l_PlatformUpdate(&platform_framebuffer, &g_platform_input, platform_memory, SECONDS_PER_UPDATE, PlatformReadFile, PlatformFreeFile, PlatformWriteFile);
+		handmade_ralph_dll.PlatformUpdate(&platform_framebuffer, &g_platform_input, platform_memory, SECONDS_PER_UPDATE, PlatformReadFile, PlatformFreeFile, PlatformWriteFile);
 
 		//
 		// Sound.
@@ -487,13 +525,13 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int cmd_show)
 				ASSERT(region_size_0 % SAMPLE_SIZE == 0);
 				FOR_ELEMS(sample, reinterpret_cast<u32*>(region_0), static_cast<i32>(region_size_0 / SAMPLE_SIZE))
 				{
-					*sample = l_PlatformSound(SAMPLES_PER_SECOND, platform_memory).sample;
+					*sample = handmade_ralph_dll.PlatformSound(SAMPLES_PER_SECOND, platform_memory).sample;
 				}
 
 				ASSERT(region_size_1 % SAMPLE_SIZE == 0);
 				FOR_ELEMS(sample, reinterpret_cast<u32*>(region_1), static_cast<i32>(region_size_1 / SAMPLE_SIZE))
 				{
-					*sample = l_PlatformSound(SAMPLES_PER_SECOND, platform_memory).sample;
+					*sample = handmade_ralph_dll.PlatformSound(SAMPLES_PER_SECOND, platform_memory).sample;
 				}
 
 				curr_sample_index += static_cast<i32>(region_size_0 / SAMPLE_SIZE) + static_cast<i32>(region_size_1 / SAMPLE_SIZE);
@@ -560,5 +598,32 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int cmd_show)
 		{
 			DEBUG_printf("HandmadeRalph_win32 :: Missed frame from computing.\n");
 		}
+
+		#if DEBUG
+		{
+			WIN32_FILE_ATTRIBUTE_DATA dll_attribute_data;
+			bool32                    ignore_nonexisting_file_error = false;
+			if
+			(
+				GetFileAttributesExW(HANDMADE_RALPH_DLL_FILE_PATH, GetFileExInfoStandard, &dll_attribute_data)
+				&& !(dll_attribute_data.ftLastWriteTime.dwHighDateTime == handmade_ralph_dll.write_time.dwHighDateTime && dll_attribute_data.ftLastWriteTime.dwLowDateTime == handmade_ralph_dll.write_time.dwLowDateTime)
+				&& GetFileAttributesW(L"" LOCK_FILE_PATH) == INVALID_FILE_ATTRIBUTES
+			)
+			{
+				ignore_nonexisting_file_error = true;
+				FreeLibrary(handmade_ralph_dll.handle);
+				handmade_ralph_dll = DEBUG_load_handmade_ralph_dll();
+			}
+
+			DWORD last_error = GetLastError();
+			if (last_error && IMPLIES(last_error == 2, !ignore_nonexisting_file_error))
+			{
+				wchar_t* buffer;
+				ASSERT(FormatMessageW(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM, 0, last_error, 0, reinterpret_cast<wchar_t*>(&buffer), 0, 0));
+				DEBUG_printf("HandmadeRalph_win32.cpp :: Latest Windows error (Code `%lu`).\n\t%S", last_error, buffer);
+				LocalFree(buffer);
+			}
+		}
+		#endif
 	}
 }

@@ -3,9 +3,9 @@
 #define BUTTON_PRESSES(BUTTON)  ((((BUTTON) & 0b01111111) >> 1) + ( BUTTON_DOWN(BUTTON) & ((BUTTON) & 0b1)))
 #define BUTTON_RELEASES(BUTTON) ((((BUTTON) & 0b01111111) >> 1) + (~BUTTON_DOWN(BUTTON) & ((BUTTON) & 0b1)))
 
-#define BTN_DOWN(BTN)     BUTTON_DOWN(MACRO_CONCAT_(platform_input->button, BTN))
-#define BTN_PRESSES(BTN)  BUTTON_PRESSES(MACRO_CONCAT_(platform_input->button, BTN))
-#define BTN_RELEASES(BTN) BUTTON_RELEASES(MACRO_CONCAT_(platform_input->button, BTN))
+#define BTN_DOWN(BTN)     BUTTON_DOWN(MACRO_CONCAT(platform_input->button, BTN))
+#define BTN_PRESSES(BTN)  BUTTON_PRESSES(MACRO_CONCAT(platform_input->button, BTN))
+#define BTN_RELEASES(BTN) BUTTON_RELEASES(MACRO_CONCAT(platform_input->button, BTN))
 
 global constexpr i32 PLATFORM_GAMEPAD_MAX = 4;
 global constexpr u64 PLATFORM_MEMORY_SIZE = GIBIBYTES_OF(1);

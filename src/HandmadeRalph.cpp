@@ -49,7 +49,7 @@ PlatformUpdate_t(PlatformUpdate)
 		}
 	}
 
-	DEBUG_printf("down %d | presses %d | releases %d\n", BTN_DOWN(.letters[0]), BTN_PRESSES(.letters[0]), BTN_RELEASES(.letters[0]));
+	//DEBUG_printf("down %d | presses %d | releases %d\n", BTN_DOWN(.letters[0]), BTN_PRESSES(.letters[0]), BTN_RELEASES(.letters[0]));
 }
 
 PlatformSound_t(PlatformSound)

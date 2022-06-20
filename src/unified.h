@@ -23,10 +23,10 @@ typedef double      f64;
 #define aliasing auto&
 #define lambda   const auto
 
-#define MACRO_CONCAT__(X, Y)                            X##Y
-#define MACRO_CONCAT_(X, Y)                             MACRO_CONCAT__(X, Y)
-#define MACRO_STRINGIFY__(X)                            #X
-#define MACRO_STRINGIFY_(X)                             MACRO_STRINGIFY__(X)
+#define MACRO_CONCAT_(X, Y)                             X##Y
+#define MACRO_CONCAT(X, Y)                              MACRO_CONCAT_(X, Y)
+#define MACRO_STRINGIFY_(X)                             #X
+#define MACRO_STRINGIFY(X)                              MACRO_STRINGIFY_(X)
 #define MACRO_EXPAND_(X)                                X
 #define MACRO_OVERLOADED_2_(_0, _1, MACRO, ...)         MACRO
 #define MACRO_OVERLOADED_3_(_0, _1, _2, MACRO, ...)     MACRO
@@ -39,8 +39,8 @@ typedef double      f64;
 #define MACRO_FOR_EACH_3_(MACRO, x, ...)                MACRO(x) MACRO_EXPAND_(MACRO_FOR_EACH_2_(MACRO, __VA_ARGS__))
 #define MACRO_FOR_EACH_4_(MACRO, x, ...)                MACRO(x) MACRO_EXPAND_(MACRO_FOR_EACH_3_(MACRO, __VA_ARGS__))
 #define MACRO_FOR_EACH_(MACRO, ...)                     MACRO_EXPAND_(MACRO_OVERLOADED_4_(__VA_ARGS__, MACRO_FOR_EACH_4_, MACRO_FOR_EACH_3_, MACRO_FOR_EACH_2_, MACRO_FOR_EACH_1_, MACRO_FOR_EACH_0_)(MACRO, __VA_ARGS__))
-#define MACRO_STRINGIFY_COMMA_(X)                       MACRO_STRINGIFY_(X),
-#define MACRO_STRINGIFY_ARGS_(...)                      MACRO_FOR_EACH_(MACRO_STRINGIFY_COMMA_, __VA_ARGS__)
+#define MACRO_STRINGIFYCOMMA_(X)                       MACRO_STRINGIFY(X),
+#define MACRO_STRINGIFYARGS_(...)                      MACRO_FOR_EACH_(MACRO_STRINGIFYCOMMA_, __VA_ARGS__)
 
 #define CAPACITY_OF_ARRAY_(XS)              (sizeof(XS) / sizeof((XS)[0]))
 #define CAPACITY_OF_MEMBER_(TYPE, MEMBER)   (CAPACITY_OF_ARRAY_(((TYPE*) 0)->MEMBER))
@@ -48,28 +48,28 @@ typedef double      f64;
 
 #define FOR_INTERVAL_(NAME, MINI, MAXI)     for (i32 NAME = (MINI); NAME < (MAXI); NAME += 1)
 #define FOR_INDICIES_(NAME, MAXI)           FOR_INTERVAL_(NAME, 0, (MAXI))
-#define FOR_REPEAT_(MAXI)                   FOR_INTERVAL_(MACRO_CONCAT_(FOR_REPEAT_, __LINE__), 0, (MAXI))
+#define FOR_REPEAT_(MAXI)                   FOR_INTERVAL_(MACRO_CONCAT(FOR_REPEAT_, __LINE__), 0, (MAXI))
 #define FOR_RANGE(...)                      MACRO_EXPAND_(MACRO_OVERLOADED_3_(__VA_ARGS__, FOR_INTERVAL_, FOR_INDICIES_, FOR_REPEAT_)(__VA_ARGS__))
 #define FOR_INTERVAL_REV_(NAME, MINI, MAXI) for (i32 NAME = (MAXI) - 1; NAME >= (MINI); NAME -= 1)
 #define FOR_INDICIES_REV_(NAME, MAXI)       FOR_INTERVAL_REV_(NAME, 0, (MAXI))
 #define FOR_RANGE_REV(...)                  MACRO_EXPAND_(MACRO_OVERLOADED_3_(__VA_ARGS__, FOR_INTERVAL_REV_, FOR_INDICIES_REV_)(__VA_ARGS__))
 
-#define FOR_POINTER_(NAME, XS, COUNT)       for (i32 MACRO_CONCAT_(NAME, _index) = 0; MACRO_CONCAT_(NAME, _index) < (COUNT); MACRO_CONCAT_(NAME, _index) += 1) if (const auto NAME = &(XS)[MACRO_CONCAT_(NAME, _index)]; false); else
+#define FOR_POINTER_(NAME, XS, COUNT)       for (i32 MACRO_CONCAT(NAME, _index) = 0; MACRO_CONCAT(NAME, _index) < (COUNT); MACRO_CONCAT(NAME, _index) += 1) if (const auto NAME = &(XS)[MACRO_CONCAT(NAME, _index)]; false); else
 #define FOR_ARRAY_(NAME, XS)                FOR_POINTER_(NAME, (XS), ARRAY_CAPACITY(XS))
 #define FOR_IT_(XS)                         FOR_POINTER_(it, (XS), ARRAY_CAPACITY(XS))
 #define FOR_ELEMS(...)                      MACRO_EXPAND_(MACRO_OVERLOADED_3_(__VA_ARGS__, FOR_POINTER_, FOR_ARRAY_, FOR_IT_)(__VA_ARGS__))
-#define FOR_POINTER_REV_(NAME, XS, COUNT)   for (i32 MACRO_CONCAT_(NAME, _index) = (COUNT) - 1; MACRO_CONCAT_(NAME, _index) >= 0; MACRO_CONCAT_(NAME, _index) -= 1) if (const auto NAME = &(XS)[MACRO_CONCAT_(NAME, _index)]; false); else
+#define FOR_POINTER_REV_(NAME, XS, COUNT)   for (i32 MACRO_CONCAT(NAME, _index) = (COUNT) - 1; MACRO_CONCAT(NAME, _index) >= 0; MACRO_CONCAT(NAME, _index) -= 1) if (const auto NAME = &(XS)[MACRO_CONCAT(NAME, _index)]; false); else
 #define FOR_ARRAY_REV_(NAME, XS)            FOR_POINTER_REV_(NAME, (XS), ARRAY_CAPACITY(XS))
 #define FOR_ELEMS_REV(...)                  MACRO_EXPAND_(MACRO_OVERLOADED_3_(__VA_ARGS__, FOR_POINTER_REV_, FOR_ARRAY_REV_)(__VA_ARGS__))
 
-#define FOR_NODES_(NAME, NODES)             if (auto NAME = (NODES); false); else for (i32 MACRO_CONCAT_(NAME, _index) = 0; NAME; MACRO_CONCAT_(NAME, _index) += 1, NAME = NAME->next_node)
+#define FOR_NODES_(NAME, NODES)             if (auto NAME = (NODES); false); else for (i32 MACRO_CONCAT(NAME, _index) = 0; NAME; MACRO_CONCAT(NAME, _index) += 1, NAME = NAME->next_node)
 #define FOR_IT_NODES_(NODES)                FOR_NODES_(it, (NODES))
 #define FOR_NODES(...)                      MACRO_EXPAND_(MACRO_OVERLOADED_2_(__VA_ARGS__, FOR_NODES_, FOR_IT_NODES_)(__VA_ARGS__))
 
 #define IMPLIES(P, Q)                       (!(P) || (Q))
 #define IFF(P, Q)                           (!(P) == !(Q))
 #define IN_RANGE(X, MINI, MAXI)             ((MINI) <= (X) && (X) < (MAXI))
-#define SWAP(X, Y)                          do { auto MACRO_CONCAT_(SWAP_, __LINE__) = *(X); *(X) = *(Y); *(Y) = MACRO_CONCAT_(SWAP_, __LINE__); } while (false)
+#define SWAP(X, Y)                          do { auto MACRO_CONCAT(SWAP_, __LINE__) = *(X); *(X) = *(Y); *(Y) = MACRO_CONCAT(SWAP_, __LINE__); } while (false)
 #define KIBIBYTES_OF(N)                     (1024ULL *             (N))
 #define MEBIBYTES_OF(N)                     (1024ULL * KIBIBYTES_OF(N))
 #define GIBIBYTES_OF(N)                     (1024ULL * MEBIBYTES_OF(N))
@@ -93,9 +93,9 @@ typedef double      f64;
 	#define DEBUG_printf(FSTR, ...)\
 	do\
 	{\
-		char MACRO_CONCAT_(DEBUG_PRINTF_, __LINE__)[1024];\
-		sprintf_s(MACRO_CONCAT_(DEBUG_PRINTF_, __LINE__), sizeof(MACRO_CONCAT_(DEBUG_PRINTF_, __LINE__)), (FSTR), __VA_ARGS__);\
-		OutputDebugStringA(MACRO_CONCAT_(DEBUG_PRINTF_, __LINE__));\
+		char MACRO_CONCAT(DEBUG_PRINTF_, __LINE__)[1024];\
+		sprintf_s(MACRO_CONCAT(DEBUG_PRINTF_, __LINE__), sizeof(MACRO_CONCAT(DEBUG_PRINTF_, __LINE__)), (FSTR), __VA_ARGS__);\
+		OutputDebugStringA(MACRO_CONCAT(DEBUG_PRINTF_, __LINE__));\
 	}\
 	while (false)
 
@@ -110,7 +110,7 @@ typedef double      f64;
 	while (false)
 
 	#define DEBUG_once\
-	for (DEBUG_persist bool32 MACRO_CONCAT_(DEBUG_ONCE_, __LINE__) = true; MACRO_CONCAT_(DEBUG_ONCE_, __LINE__); MACRO_CONCAT_(DEBUG_ONCE_, __LINE__) = false)
+	for (DEBUG_persist bool32 MACRO_CONCAT(DEBUG_ONCE_, __LINE__) = true; MACRO_CONCAT(DEBUG_ONCE_, __LINE__); MACRO_CONCAT(DEBUG_ONCE_, __LINE__) = false)
 
 	global const i64 DEBUG_PERFORMANCE_COUNTER_FREQUENCY =
 		[](void)
@@ -121,26 +121,26 @@ typedef double      f64;
 		}();
 
 	#define DEBUG_PROFILER_start(NAME)\
-	LARGE_INTEGER MACRO_CONCAT_(NAME, _LI_0_);\
-	QueryPerformanceCounter(&MACRO_CONCAT_(NAME, _LI_0_));\
-	u64 MACRO_CONCAT_(NAME, _CC_0_) = __rdtsc()
+	LARGE_INTEGER MACRO_CONCAT(NAME, _LI_0_);\
+	QueryPerformanceCounter(&MACRO_CONCAT(NAME, _LI_0_));\
+	u64 MACRO_CONCAT(NAME, _CC_0_) = __rdtsc()
 
 	#define DEBUG_PROFILER_end(NAME, SAMPLES)\
-	u64 MACRO_CONCAT_(NAME, _CC_1_) = __rdtsc();\
-	LARGE_INTEGER MACRO_CONCAT_(NAME, _LI_1_);\
-	QueryPerformanceCounter(&MACRO_CONCAT_(NAME, _LI_1_));\
-	DEBUG_persist u64 MACRO_CONCAT_(NAME, _LI_TOTAL_) = 0;\
-	DEBUG_persist u64 MACRO_CONCAT_(NAME, _CC_TOTAL_) = 0;\
-	DEBUG_persist u64 MACRO_CONCAT_(NAME, _COUNTER_)  = 0;\
-	MACRO_CONCAT_(NAME, _LI_TOTAL_)   += MACRO_CONCAT_(NAME, _LI_1_).QuadPart - MACRO_CONCAT_(NAME, _LI_0_).QuadPart;\
-	MACRO_CONCAT_(NAME, _CC_TOTAL_)   += MACRO_CONCAT_(NAME, _CC_1_)          - MACRO_CONCAT_(NAME, _CC_0_);\
-	MACRO_CONCAT_(NAME, _COUNTER_) += 1;\
-	if (MACRO_CONCAT_(NAME, _COUNTER_) >= (SAMPLES))\
+	u64 MACRO_CONCAT(NAME, _CC_1_) = __rdtsc();\
+	LARGE_INTEGER MACRO_CONCAT(NAME, _LI_1_);\
+	QueryPerformanceCounter(&MACRO_CONCAT(NAME, _LI_1_));\
+	DEBUG_persist u64 MACRO_CONCAT(NAME, _LI_TOTAL_) = 0;\
+	DEBUG_persist u64 MACRO_CONCAT(NAME, _CC_TOTAL_) = 0;\
+	DEBUG_persist u64 MACRO_CONCAT(NAME, _COUNTER_)  = 0;\
+	MACRO_CONCAT(NAME, _LI_TOTAL_)   += MACRO_CONCAT(NAME, _LI_1_).QuadPart - MACRO_CONCAT(NAME, _LI_0_).QuadPart;\
+	MACRO_CONCAT(NAME, _CC_TOTAL_)   += MACRO_CONCAT(NAME, _CC_1_)          - MACRO_CONCAT(NAME, _CC_0_);\
+	MACRO_CONCAT(NAME, _COUNTER_) += 1;\
+	if (MACRO_CONCAT(NAME, _COUNTER_) >= (SAMPLES))\
 	{\
-		DEBUG_printf(MACRO_STRINGIFY_(NAME) "\n\t:: %8.4f ms\n\t:: %8.4f mc\n", static_cast<f64>(MACRO_CONCAT_(NAME, _LI_TOTAL_)) / MACRO_CONCAT_(NAME, _COUNTER_) / DEBUG_PERFORMANCE_COUNTER_FREQUENCY * 1000.0, static_cast<f64>(MACRO_CONCAT_(NAME, _CC_TOTAL_)) / MACRO_CONCAT_(NAME, _COUNTER_) / 1000000.0);\
-		MACRO_CONCAT_(NAME, _LI_TOTAL_) = 0;\
-		MACRO_CONCAT_(NAME, _CC_TOTAL_) = 0;\
-		MACRO_CONCAT_(NAME, _COUNTER_)  = 0;\
+		DEBUG_printf(MACRO_STRINGIFY(NAME) "\n\t:: %8.4f ms\n\t:: %8.4f mc\n", static_cast<f64>(MACRO_CONCAT(NAME, _LI_TOTAL_)) / MACRO_CONCAT(NAME, _COUNTER_) / DEBUG_PERFORMANCE_COUNTER_FREQUENCY * 1000.0, static_cast<f64>(MACRO_CONCAT(NAME, _CC_TOTAL_)) / MACRO_CONCAT(NAME, _COUNTER_) / 1000000.0);\
+		MACRO_CONCAT(NAME, _LI_TOTAL_) = 0;\
+		MACRO_CONCAT(NAME, _CC_TOTAL_) = 0;\
+		MACRO_CONCAT(NAME, _COUNTER_)  = 0;\
 	}
 #else
 	#define ASSERT(EXPRESSION)
@@ -179,11 +179,11 @@ internal constexpr NAME operator<<=(      NAME& a, const i32&  n) { return a = s
 internal constexpr NAME operator>>=(      NAME& a, const i32&  n) { return a = static_cast<NAME>( (+a) >> n  ); }\
 enum struct NAME : TYPE
 
-#define enum_start_region(NAME) MACRO_CONCAT_(NAME, _START), MACRO_CONCAT_(NAME, _START_) = MACRO_CONCAT_(NAME, _START) - 1,
-#define enum_end_region(NAME)   MACRO_CONCAT_(NAME, _END), MACRO_CONCAT_(NAME, _COUNT) = MACRO_CONCAT_(NAME, _END) - MACRO_CONCAT_(NAME, _START), MACRO_CONCAT_(NAME, _END_) = MACRO_CONCAT_(NAME, _END) - 1,
+#define enum_start_region(NAME) MACRO_CONCAT(NAME, _START), MACRO_CONCAT(NAME, _START_) = MACRO_CONCAT(NAME, _START) - 1,
+#define enum_end_region(NAME)   MACRO_CONCAT(NAME, _END), MACRO_CONCAT(NAME, _COUNT) = MACRO_CONCAT(NAME, _END) - MACRO_CONCAT(NAME, _START), MACRO_CONCAT(NAME, _END_) = MACRO_CONCAT(NAME, _END) - 1,
 
 #include <utility>
-#define DEFER auto MACRO_CONCAT_(DEFER_, __LINE__) = DEFER_EMPTY_ {} + [&]()
+#define DEFER auto MACRO_CONCAT(DEFER_, __LINE__) = DEFER_EMPTY_ {} + [&]()
 
 template <typename F>
 struct DEFER_
@@ -241,8 +241,8 @@ internal void push_entire_node(TYPE* head, TYPE** node)
 //
 
 #define memory_arena_checkpoint(ARENA)\
-u64 MACRO_CONCAT_(MEMORY_ARENA_CHECKPOINT_, __LINE__) = (ARENA)->used;\
-DEFER { (ARENA)->used = MACRO_CONCAT_(MEMORY_ARENA_CHECKPOINT_, __LINE__); }
+u64 MACRO_CONCAT(MEMORY_ARENA_CHECKPOINT_, __LINE__) = (ARENA)->used;\
+DEFER { (ARENA)->used = MACRO_CONCAT(MEMORY_ARENA_CHECKPOINT_, __LINE__); }
 
 struct MemoryArena
 {
@@ -530,10 +530,10 @@ internal constexpr vi3    vx3(const i32& a) { return { a, a, a    }; }
 internal constexpr vf4    vx4(const f32& a) { return { a, a, a, a }; }
 internal constexpr vi4    vx4(const i32& a) { return { a, a, a, a }; }
 
-#define VXX_COLOR_F3_(C0, C1, C2)     (static_cast<u32>(static_cast<u8>(MACRO_CONCAT_(v., C0) * 255.0f) << 16) | static_cast<u32>(static_cast<u8>(MACRO_CONCAT_(v., C1) * 255.0f) <<  8) | static_cast<u32>(static_cast<u8>(MACRO_CONCAT_(v., C2) * 255.0f) << 0))
-#define VXX_COLOR_F4_(C0, C1, C2, C3) (static_cast<u32>(static_cast<u8>(MACRO_CONCAT_(v., C0) * 255.0f) << 24) | static_cast<u32>(static_cast<u8>(MACRO_CONCAT_(v., C1) * 255.0f) << 16) | static_cast<u32>(static_cast<u8>(MACRO_CONCAT_(v., C2) * 255.0f) << 8) | static_cast<u32>(static_cast<u8>(MACRO_CONCAT_(v., C3) * 255.0f) << 0))
-#define VXX_COLOR_I3_(C0, C1, C2)     (static_cast<u32>(static_cast<u8>(MACRO_CONCAT_(v., C0)) << 16) | static_cast<u32>(static_cast<u8>(MACRO_CONCAT_(v., C1)) <<  8) | static_cast<u32>(static_cast<u8>(MACRO_CONCAT_(v., C2)) << 0))
-#define VXX_COLOR_I4_(C0, C1, C2, C3) (static_cast<u32>(static_cast<u8>(MACRO_CONCAT_(v., C0)) << 24) | static_cast<u32>(static_cast<u8>(MACRO_CONCAT_(v., C1)) << 16) | static_cast<u32>(static_cast<u8>(MACRO_CONCAT_(v., C2)) << 8) | static_cast<u32>(static_cast<u8>(MACRO_CONCAT_(v., C3)) << 0))
+#define VXX_COLOR_F3_(C0, C1, C2)     (static_cast<u32>(static_cast<u8>(MACRO_CONCAT(v., C0) * 255.0f) << 16) | static_cast<u32>(static_cast<u8>(MACRO_CONCAT(v., C1) * 255.0f) <<  8) | static_cast<u32>(static_cast<u8>(MACRO_CONCAT(v., C2) * 255.0f) << 0))
+#define VXX_COLOR_F4_(C0, C1, C2, C3) (static_cast<u32>(static_cast<u8>(MACRO_CONCAT(v., C0) * 255.0f) << 24) | static_cast<u32>(static_cast<u8>(MACRO_CONCAT(v., C1) * 255.0f) << 16) | static_cast<u32>(static_cast<u8>(MACRO_CONCAT(v., C2) * 255.0f) << 8) | static_cast<u32>(static_cast<u8>(MACRO_CONCAT(v., C3) * 255.0f) << 0))
+#define VXX_COLOR_I3_(C0, C1, C2)     (static_cast<u32>(static_cast<u8>(MACRO_CONCAT(v., C0)) << 16) | static_cast<u32>(static_cast<u8>(MACRO_CONCAT(v., C1)) <<  8) | static_cast<u32>(static_cast<u8>(MACRO_CONCAT(v., C2)) << 0))
+#define VXX_COLOR_I4_(C0, C1, C2, C3) (static_cast<u32>(static_cast<u8>(MACRO_CONCAT(v., C0)) << 24) | static_cast<u32>(static_cast<u8>(MACRO_CONCAT(v., C1)) << 16) | static_cast<u32>(static_cast<u8>(MACRO_CONCAT(v., C2)) << 8) | static_cast<u32>(static_cast<u8>(MACRO_CONCAT(v., C3)) << 0))
 internal constexpr u32 vxx_argb(const vf3& v) { return VXX_COLOR_F3_(   x, y, z); };
 internal constexpr u32 vxx_argb(const vf4& v) { return VXX_COLOR_F4_(w, x, y, z); };
 internal constexpr u32 vxx_argb(const vi3& v) { return VXX_COLOR_I3_(   x, y, z); };
