@@ -17,10 +17,10 @@ PlatformUpdate_t(PlatformUpdate)
 	if (!state->initialized)
 	{
 		state->initialized = true;
-		state->hertz       = 512.0f;
 	}
 
 	state->offset.x += static_cast<i32>(200.0f * platform_delta_time);
+	state->offset   += vxx(400.0f * platform_input->gamepads[0].stick_left * platform_delta_time);
 
 	if (BTN_DOWN(.gamepads[0].action_left))
 	{
@@ -38,24 +38,29 @@ PlatformUpdate_t(PlatformUpdate)
 	{
 		state->offset.y -= 1;
 	}
-	state->hertz += BTN_DOWN(.arrow_up);
+	state->hertz = 512.0f + platform_input->gamepads[0].stick_right.y * 100.0f;
 
-	FOR_RANGE(y, platform_framebuffer->dimensions.y)
+	FOR_RANGE(y, platform_framebuffer_dimensions.y)
 	{
-		FOR_RANGE(x, platform_framebuffer->dimensions.x)
+		FOR_RANGE(x, platform_framebuffer_dimensions.x)
 		{
-			platform_framebuffer->pixels[y * platform_framebuffer->dimensions.x + x] =
+			platform_framebuffer[y * platform_framebuffer_dimensions.x + x] =
 				vxx_argb(vi3 { state->offset.x + x, state->offset.y + y, state->offset.x + x + state->offset.y + y });
 		}
 	}
 
 	//DEBUG_printf("down %d | presses %d | releases %d\n", BTN_DOWN(.letters[0]), BTN_PRESSES(.letters[0]), BTN_RELEASES(.letters[0]));
+
+	state->t = fmodf(state->t, TAU);
 }
 
 PlatformSound_t(PlatformSound)
 {
-	//State* state = reinterpret_cast<State*>(platform_memory);
-	//state->t += TAU * state->hertz / platform_samples_per_second;
-	//return { static_cast<i16>(sinf(state->t) * 500.0f), static_cast<i16>(sinf(state->t) * 500.0f) };
-	return {};
+	State* state = reinterpret_cast<State*>(platform_memory);
+
+	FOR_ELEMS(sample, platform_sample_buffer, platform_sample_count)
+	{
+		*sample   = { static_cast<i16>(sinf(state->t) * 250.0f), static_cast<i16>(sinf(state->t) * 250.0f) };
+		state->t += TAU * state->hertz / platform_samples_per_second;
+	}
 }

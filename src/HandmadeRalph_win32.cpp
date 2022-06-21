@@ -143,22 +143,22 @@ PlatformWriteFile_t(PlatformWriteFile)
 	DEFER { CloseHandle(handle); };
 
 	// @TODO@ Larger file sizes.
-	if (platform_size > 0xFFFFFFFF)
+	if (platform_write_size > 0xFFFFFFFF)
 	{
-		DEBUG_printf(__FUNCTION__ " :: `%zu` bytes is too big to write out to `%S`; must be less than 2^32 bytes (4.29GB).\n", platform_size, platform_file_path);
+		DEBUG_printf(__FUNCTION__ " :: `%zu` bytes is too big to write out to `%S`; must be less than 2^32 bytes (4.29GB).\n", platform_write_size, platform_file_path);
 		return false;
 	}
 
 	DWORD write_size;
-	if (!WriteFile(handle, platform_data, static_cast<u32>(platform_size), &write_size, 0))
+	if (!WriteFile(handle, platform_write_data, static_cast<u32>(platform_write_size), &write_size, 0))
 	{
 		DEBUG_printf(__FUNCTION__ " :: Couldn't write into `%S`.\n", platform_file_path);
 		return false;
 	}
 
-	if (write_size != platform_size)
+	if (write_size != platform_write_size)
 	{
-		DEBUG_printf(__FUNCTION__ " :: Incomplete write of `%ld` out of `%zu` bytes to `%S`.\n", write_size, platform_size, platform_file_path);
+		DEBUG_printf(__FUNCTION__ " :: Incomplete write of `%ld` out of `%zu` bytes to `%S`.\n", write_size, platform_write_size, platform_file_path);
 		return false;
 	}
 
@@ -183,7 +183,7 @@ internal void poll_gamepads(void)
 	{
 		XINPUT_STATE gamepad_state;
 		if (g_XInputGetState(static_cast<DWORD>(i), &gamepad_state) == ERROR_SUCCESS)
-		{
+		{ // @TODO@ Connection status.
 			PROCESS_PLATFORM_BUTTON(.gamepads[i].action_left,    (gamepad_state.Gamepad.wButtons & XINPUT_GAMEPAD_X             ) != 0);
 			PROCESS_PLATFORM_BUTTON(.gamepads[i].action_right,   (gamepad_state.Gamepad.wButtons & XINPUT_GAMEPAD_B             ) != 0);
 			PROCESS_PLATFORM_BUTTON(.gamepads[i].action_down,    (gamepad_state.Gamepad.wButtons & XINPUT_GAMEPAD_A             ) != 0);
@@ -269,7 +269,7 @@ internal LRESULT window_procedure_callback(HWND window, UINT message, WPARAM wpa
 						case VK_UP     : { PROCESS_PLATFORM_BUTTON(.arrow_up,    is_down); } break;
 						case VK_RETURN : { PROCESS_PLATFORM_BUTTON(.enter,       is_down); } break;
 						case VK_SHIFT  : { PROCESS_PLATFORM_BUTTON(.shift,       is_down); } break;
-
+						case VK_MENU   : { PROCESS_PLATFORM_BUTTON(.alt,         is_down); } break;
 						case VK_F4:
 						{
 							if (lparam & (1 << 29))
@@ -348,9 +348,9 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int cmd_show)
 	// Initialize DirectSound.
 	//
 
-	constexpr i32 SAMPLES_PER_SECOND = 48000;
-	constexpr i32 SAMPLE_SIZE        = 2 * sizeof(i16);
-	constexpr u32 SOUND_BUFFER_SIZE  = 1 * SAMPLES_PER_SECOND * SAMPLE_SIZE;
+	constexpr i32 SAMPLES_PER_SECOND   = 48000;
+	constexpr i32 SOUNDBUFFER_CAPACITY = 1 * SAMPLES_PER_SECOND;
+	constexpr i32 SOUNDBUFFER_SIZE     = SOUNDBUFFER_CAPACITY * sizeof(PlatformSample);
 
 	IDirectSoundBuffer* directsound_buffer;
 	{
@@ -405,7 +405,7 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int cmd_show)
 		DSBUFFERDESC secondary_buffer_description =
 			{
 				.dwSize        = sizeof(secondary_buffer_description),
-				.dwBufferBytes = SOUND_BUFFER_SIZE,
+				.dwBufferBytes = SOUNDBUFFER_SIZE,
 				.lpwfxFormat   = &primary_buffer_format
 			};
 		if (directsound->CreateSoundBuffer(&secondary_buffer_description, &directsound_buffer, 0) != DS_OK)
@@ -418,7 +418,7 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int cmd_show)
 		DWORD region_size_0;
 		byte* region_1;
 		DWORD region_size_1;
-		if (directsound_buffer->Lock(0, SOUND_BUFFER_SIZE, reinterpret_cast<void**>(&region_0), &region_size_0, reinterpret_cast<void**>(&region_1), &region_size_1, 0) == DS_OK)
+		if (directsound_buffer->Lock(0, SOUNDBUFFER_SIZE, reinterpret_cast<void**>(&region_0), &region_size_0, reinterpret_cast<void**>(&region_1), &region_size_1, 0) == DS_OK)
 		{
 			memset(region_0, 0, region_size_0);
 			memset(region_1, 0, region_size_1);
@@ -432,9 +432,11 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int cmd_show)
 	// Miscellaneous initializations.
 	//
 
-	bool32 is_sleep_granular = timeBeginPeriod(1) == TIMERR_NOERROR;
-
-	constexpr BITMAPINFO BACKBUFFER_BITMAP_INFO =
+	constexpr f32        SECONDS_PER_UPDATE              = 1.0f / 30.0f;
+	constexpr i32        SAMPLES_OF_LATENCY              = SAMPLES_PER_SECOND / 30;
+	constexpr i32        MAXIMUM_SAMPLES_PER_UPDATE      = static_cast<i32>(SAMPLES_PER_SECOND * SECONDS_PER_UPDATE + 1);
+	constexpr i32        PLATFORM_SAMPLE_BUFFER_CAPACITY = 4 * MAXIMUM_SAMPLES_PER_UPDATE;
+	constexpr BITMAPINFO BACKBUFFER_BITMAP_INFO          =
 		{
 			.bmiHeader =
 				{
@@ -447,8 +449,10 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int cmd_show)
 				}
 		};
 
-	byte* backbuffer_bitmap_data = reinterpret_cast<byte*>(VirtualAlloc(0, static_cast<size_t>(4) * BACKBUFFER_BITMAP_INFO.bmiHeader.biWidth * -BACKBUFFER_BITMAP_INFO.bmiHeader.biHeight, MEM_COMMIT, PAGE_READWRITE));
-	byte* platform_memory        =
+	bool32          is_sleep_granular      = timeBeginPeriod(1) == TIMERR_NOERROR;
+	byte*           backbuffer_bitmap_data = reinterpret_cast<byte*>(VirtualAlloc(0, static_cast<size_t>(4) * BACKBUFFER_BITMAP_INFO.bmiHeader.biWidth * -BACKBUFFER_BITMAP_INFO.bmiHeader.biHeight, MEM_COMMIT, PAGE_READWRITE));
+	PlatformSample* platform_sample_buffer = reinterpret_cast<PlatformSample*>(VirtualAlloc(0, PLATFORM_SAMPLE_BUFFER_CAPACITY * sizeof(PlatformSample), MEM_COMMIT, PAGE_READWRITE));
+	byte*           platform_memory        =
 		#if DEBUG
 		reinterpret_cast<byte*>(VirtualAlloc(reinterpret_cast<void*>(TEBIBYTES_OF(8)), PLATFORM_MEMORY_SIZE, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE));
 		#else
@@ -460,10 +464,9 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int cmd_show)
 
 	HandmadeRalphDLL handmade_ralph_dll = DEBUG_load_handmade_ralph_dll();
 
-	constexpr f32 SECONDS_PER_UPDATE = 1.0f / 30.0f;
-
-	u32 curr_sample_index = 0;
-	i64 performance_counter_start;
+	bool32 is_computed_sample_on_time = false;
+	i32    last_computed_sample_index = 0;
+	i64    performance_counter_start;
 	while (true)
 	{
 		performance_counter_start = query_performance_counter();
@@ -490,52 +493,127 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int cmd_show)
 		// Update.
 		//
 
-		PlatformFramebuffer platform_framebuffer =
-			{
-				.dimensions = { BACKBUFFER_BITMAP_INFO.bmiHeader.biWidth, -BACKBUFFER_BITMAP_INFO.bmiHeader.biHeight },
-				.pixels     = reinterpret_cast<u32*>(backbuffer_bitmap_data)
-			};
+		#if DEBUG
+		enum struct InputReplayState : u8
+		{
+			none,
+			recording,
+			replaying
+		};
 
-		handmade_ralph_dll.PlatformUpdate(&platform_framebuffer, &g_platform_input, platform_memory, SECONDS_PER_UPDATE, PlatformReadFile, PlatformFreeFile, PlatformWriteFile);
+		DEBUG_persist InputReplayState input_replay_state;
+
+		if (BUTTON_DOWN(g_platform_input.button.alt) && BUTTON_PRESSES(g_platform_input.button.numbers[1]))
+		{
+			switch (input_replay_state)
+			{
+				case InputReplayState::none:
+				{
+					input_replay_state = InputReplayState::recording;
+					DEBUG_printf("Recording\n");
+				} break;
+
+				case InputReplayState::recording:
+				{
+					input_replay_state = InputReplayState::replaying;
+					DEBUG_printf("Replaying\n");
+				} break;
+
+				case InputReplayState::replaying:
+				{
+					input_replay_state = InputReplayState::none;
+					DEBUG_printf("None\n");
+				} break;
+			}
+		}
+		#endif
+
+		// @TODO@ Platform-agnostic pixel-layout framebuffer.
+		handmade_ralph_dll.PlatformUpdate(reinterpret_cast<u32*>(backbuffer_bitmap_data), { BACKBUFFER_BITMAP_INFO.bmiHeader.biWidth, -BACKBUFFER_BITMAP_INFO.bmiHeader.biHeight }, &g_platform_input, platform_memory, SECONDS_PER_UPDATE, PlatformReadFile, PlatformFreeFile, PlatformWriteFile);
 
 		//
 		// Sound.
 		//
 
-		DWORD play_offset;
-		DWORD write_offset;
-		if (directsound_buffer->GetCurrentPosition(&play_offset, &write_offset) == DS_OK)
 		{
-			constexpr DWORD SOUND_LATENCY = SAMPLES_PER_SECOND / 15 * SAMPLE_SIZE; // @TODO@ Better latency.
-
-			DWORD target_offset = (play_offset + SOUND_LATENCY) % SOUND_BUFFER_SIZE;
-			DWORD sample_offset = curr_sample_index * SAMPLE_SIZE % SOUND_BUFFER_SIZE;
-			DWORD write_size    = target_offset - sample_offset;
-			if (target_offset < sample_offset)
+			DWORD player_byte_offset;
+			DWORD writer_byte_offset;
+			if (directsound_buffer->GetCurrentPosition(&player_byte_offset, &writer_byte_offset) == DS_OK)
 			{
-				write_size = SOUND_BUFFER_SIZE + write_size;
+				ASSERT(player_byte_offset % sizeof(PlatformSample) == 0);
+				ASSERT(writer_byte_offset % sizeof(PlatformSample) == 0);
+
+				if (!is_computed_sample_on_time)
+				{
+					is_computed_sample_on_time = true;
+					last_computed_sample_index = static_cast<i32>(writer_byte_offset / sizeof(PlatformSample));
+				}
+
+				i32 player_sample_index            = static_cast<i32>(player_byte_offset / sizeof(PlatformSample));
+				i32 abs_last_computed_sample_index = last_computed_sample_index;
+				if (abs_last_computed_sample_index < player_sample_index)
+				{
+					abs_last_computed_sample_index += SOUNDBUFFER_CAPACITY;
+				}
+
+				if (abs_last_computed_sample_index >= static_cast<i32>(writer_byte_offset / sizeof(PlatformSample)) + SOUNDBUFFER_CAPACITY * (writer_byte_offset < player_byte_offset))
+				{
+					i32 abs_sample_index_after_next_update = static_cast<i32>(ceilf((SECONDS_PER_UPDATE - calc_performance_counter_delta_time(performance_counter_start, query_performance_counter())) * SAMPLES_PER_SECOND));
+					i32 new_computed_sample_count          = player_sample_index + abs_sample_index_after_next_update - abs_last_computed_sample_index + (1 + (MAXIMUM_SAMPLES_PER_UPDATE + SAMPLES_OF_LATENCY - abs_sample_index_after_next_update) / MAXIMUM_SAMPLES_PER_UPDATE) * MAXIMUM_SAMPLES_PER_UPDATE;
+					if (new_computed_sample_count > 0)
+					{
+						if (new_computed_sample_count > PLATFORM_SAMPLE_BUFFER_CAPACITY)
+						{
+							DEBUG_printf("HandmadeRalph_win32.cpp :: Too many samples are needed to be computed (`%d`); maximum is `%d`.\n", new_computed_sample_count, PLATFORM_SAMPLE_BUFFER_CAPACITY);
+							is_computed_sample_on_time = false;
+						}
+						else
+						{
+							byte* region_0;
+							DWORD region_size_0;
+							byte* region_1;
+							DWORD region_size_1;
+							if (directsound_buffer->Lock(last_computed_sample_index * sizeof(PlatformSample), new_computed_sample_count * sizeof(PlatformSample), reinterpret_cast<void**>(&region_0), &region_size_0, reinterpret_cast<void**>(&region_1), &region_size_1, 0) == DS_OK)
+							{
+								handmade_ralph_dll.PlatformSound(platform_sample_buffer, new_computed_sample_count, SAMPLES_PER_SECOND, platform_memory);
+
+								PlatformSample* curr_sample = platform_sample_buffer;
+
+								ASSERT(region_size_0 % sizeof(PlatformSample) == 0);
+								FOR_ELEMS(sample, reinterpret_cast<u32*>(region_0), static_cast<i32>(region_size_0 / sizeof(PlatformSample)))
+								{
+									*sample      = curr_sample->sample;
+									curr_sample += 1;
+								}
+
+								ASSERT(region_size_1 % sizeof(PlatformSample) == 0);
+								FOR_ELEMS(sample, reinterpret_cast<u32*>(region_1), static_cast<i32>(region_size_1 / sizeof(PlatformSample)))
+								{
+									*sample      = curr_sample->sample;
+									curr_sample += 1;
+								}
+
+								last_computed_sample_index = (last_computed_sample_index + new_computed_sample_count) % SOUNDBUFFER_CAPACITY;
+								directsound_buffer->Unlock(region_0, region_size_0, region_1, region_size_1);
+							}
+							else
+							{
+								DEBUG_printf("DirectSound :: Failed to lock soundbuffer.\n");
+								is_computed_sample_on_time = false;
+							}
+						}
+					}
+				}
+				else
+				{
+					DEBUG_printf("HandmadeRalph_win32.cpp :: Cursor played over uncomputed audio in the soundbuffer.\n");
+					is_computed_sample_on_time = false;
+				}
 			}
-
-			byte* region_0;
-			DWORD region_size_0;
-			byte* region_1;
-			DWORD region_size_1;
-			if (directsound_buffer->Lock(sample_offset, write_size, reinterpret_cast<void**>(&region_0), &region_size_0, reinterpret_cast<void**>(&region_1), &region_size_1, 0) == DS_OK)
+			else
 			{
-				ASSERT(region_size_0 % SAMPLE_SIZE == 0);
-				FOR_ELEMS(sample, reinterpret_cast<u32*>(region_0), static_cast<i32>(region_size_0 / SAMPLE_SIZE))
-				{
-					*sample = handmade_ralph_dll.PlatformSound(SAMPLES_PER_SECOND, platform_memory).sample;
-				}
-
-				ASSERT(region_size_1 % SAMPLE_SIZE == 0);
-				FOR_ELEMS(sample, reinterpret_cast<u32*>(region_1), static_cast<i32>(region_size_1 / SAMPLE_SIZE))
-				{
-					*sample = handmade_ralph_dll.PlatformSound(SAMPLES_PER_SECOND, platform_memory).sample;
-				}
-
-				curr_sample_index += static_cast<i32>(region_size_0 / SAMPLE_SIZE) + static_cast<i32>(region_size_1 / SAMPLE_SIZE);
-				directsound_buffer->Unlock(region_0, region_size_0, region_1, region_size_1);
+				DEBUG_printf("DirectSound :: Failed to get play/write position in soundbuffer.\n");
+				is_computed_sample_on_time = false;
 			}
 		}
 
@@ -599,6 +677,7 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int cmd_show)
 			DEBUG_printf("HandmadeRalph_win32 :: Missed frame from computing.\n");
 		}
 
+		// @TODO@ Use polling?
 		#if DEBUG
 		{
 			WIN32_FILE_ATTRIBUTE_DATA dll_attribute_data;

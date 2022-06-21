@@ -2,19 +2,12 @@
 #define BUTTON_DOWN(BUTTON)     ((BUTTON) >> 7)
 #define BUTTON_PRESSES(BUTTON)  ((((BUTTON) & 0b01111111) >> 1) + ( BUTTON_DOWN(BUTTON) & ((BUTTON) & 0b1)))
 #define BUTTON_RELEASES(BUTTON) ((((BUTTON) & 0b01111111) >> 1) + (~BUTTON_DOWN(BUTTON) & ((BUTTON) & 0b1)))
-
-#define BTN_DOWN(BTN)     BUTTON_DOWN(MACRO_CONCAT(platform_input->button, BTN))
-#define BTN_PRESSES(BTN)  BUTTON_PRESSES(MACRO_CONCAT(platform_input->button, BTN))
-#define BTN_RELEASES(BTN) BUTTON_RELEASES(MACRO_CONCAT(platform_input->button, BTN))
+#define BTN_DOWN(BTN)           BUTTON_DOWN(MACRO_CONCAT(platform_input->button, BTN))
+#define BTN_PRESSES(BTN)        BUTTON_PRESSES(MACRO_CONCAT(platform_input->button, BTN))
+#define BTN_RELEASES(BTN)       BUTTON_RELEASES(MACRO_CONCAT(platform_input->button, BTN))
 
 global constexpr i32 PLATFORM_GAMEPAD_MAX = 4;
 global constexpr u64 PLATFORM_MEMORY_SIZE = GIBIBYTES_OF(1);
-
-struct PlatformFramebuffer
-{
-	vi2  dimensions;
-	u32* pixels;
-};
 
 struct PlatformSample
 {
@@ -63,6 +56,7 @@ struct PlatformInput
 			u8 arrow_up;
 			u8 enter;
 			u8 shift;
+			u8 alt;
 		} button;
 
 		u8 buttons[sizeof(button) / sizeof(u8)];
@@ -91,11 +85,11 @@ typedef PlatformReadFile_t(PlatformReadFile_t);
 #define PlatformFreeFile_t(NAME) void NAME(PlatformFile* platform_file)
 typedef PlatformFreeFile_t(PlatformFreeFile_t);
 
-#define PlatformWriteFile_t(NAME) bool32 NAME(const wchar_t* platform_file_path, byte* platform_data, u64 platform_size)
+#define PlatformWriteFile_t(NAME) bool32 NAME(const wchar_t* platform_file_path, byte* platform_write_data, u64 platform_write_size)
 typedef PlatformWriteFile_t(PlatformWriteFile_t);
 
-#define PlatformUpdate_t(NAME) void NAME(PlatformFramebuffer* platform_framebuffer, PlatformInput* platform_input, byte* platform_memory, f32 platform_delta_time, PlatformReadFile_t PlatformReadFile, PlatformFreeFile_t PlatformFreeFile, PlatformWriteFile_t PlatformWriteFile)
+#define PlatformUpdate_t(NAME) void NAME(u32* platform_framebuffer, vi2 platform_framebuffer_dimensions, PlatformInput* platform_input, byte* platform_memory, f32 platform_delta_time, PlatformReadFile_t PlatformReadFile, PlatformFreeFile_t PlatformFreeFile, PlatformWriteFile_t PlatformWriteFile)
 typedef PlatformUpdate_t(PlatformUpdate_t);
 
-#define PlatformSound_t(NAME) PlatformSample NAME(i32 platform_samples_per_second, byte* platform_memory)
+#define PlatformSound_t(NAME) void NAME(PlatformSample* platform_sample_buffer, i32 platform_sample_count, i32 platform_samples_per_second, byte* platform_memory)
 typedef PlatformSound_t(PlatformSound_t);
