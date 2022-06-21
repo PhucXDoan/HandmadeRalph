@@ -64,10 +64,11 @@ struct PlatformInput
 
 	struct
 	{
-		f32 trigger_left;
-		f32 trigger_right;
-		vf2 stick_left;
-		vf2 stick_right;
+		bool32 connected;
+		f32    trigger_left;
+		f32    trigger_right;
+		vf2    stick_left;
+		vf2    stick_right;
 	} gamepads[PLATFORM_GAMEPAD_MAX];
 };
 
