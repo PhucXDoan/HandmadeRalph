@@ -20,7 +20,7 @@ PlatformUpdate_t(PlatformUpdate)
 	}
 
 	state->offset.x += static_cast<i32>(200.0f * platform_delta_time);
-	state->offset   += vxx(400.0f * platform_input->gamepads[0].stick_left * platform_delta_time);
+	state->offset   += vxx(200.0f * platform_input->gamepads[0].stick_left * platform_delta_time);
 
 	if (BTN_DOWN(.gamepads[0].action_left))
 	{

@@ -72,7 +72,7 @@ struct PlatformInput
 	} gamepads[PLATFORM_GAMEPAD_MAX];
 };
 
-struct PlatformFile
+struct PlatformFileData
 {
 	u64   size;
 	byte* data;
@@ -80,16 +80,16 @@ struct PlatformFile
 
 // @TODO@ Less generic IO system.
 // @TODO@ Macro that provides where the call was made?
-#define PlatformReadFile_t(NAME) bool32 NAME(PlatformFile* platform_file, const wchar_t* platform_file_path)
-typedef PlatformReadFile_t(PlatformReadFile_t);
+#define PlatformReadFileData_t(NAME) bool32 NAME(PlatformFileData* platform_file_data, const wchar_t* platform_file_path)
+typedef PlatformReadFileData_t(PlatformReadFileData_t);
 
-#define PlatformFreeFile_t(NAME) void NAME(PlatformFile* platform_file)
-typedef PlatformFreeFile_t(PlatformFreeFile_t);
+#define PlatformFreeFileData_t(NAME) void NAME(PlatformFileData* platform_file_data)
+typedef PlatformFreeFileData_t(PlatformFreeFileData_t);
 
 #define PlatformWriteFile_t(NAME) bool32 NAME(const wchar_t* platform_file_path, byte* platform_write_data, u64 platform_write_size)
 typedef PlatformWriteFile_t(PlatformWriteFile_t);
 
-#define PlatformUpdate_t(NAME) void NAME(u32* platform_framebuffer, vi2 platform_framebuffer_dimensions, PlatformInput* platform_input, byte* platform_memory, f32 platform_delta_time, PlatformReadFile_t PlatformReadFile, PlatformFreeFile_t PlatformFreeFile, PlatformWriteFile_t PlatformWriteFile)
+#define PlatformUpdate_t(NAME) void NAME(u32* platform_framebuffer, vi2 platform_framebuffer_dimensions, PlatformInput* platform_input, byte* platform_memory, f32 platform_delta_time, PlatformReadFileData_t PlatformReadFileData, PlatformFreeFileData_t PlatformFreeFileData, PlatformWriteFile_t PlatformWriteFile)
 typedef PlatformUpdate_t(PlatformUpdate_t);
 
 #define PlatformSound_t(NAME) void NAME(PlatformSample* platform_sample_buffer, i32 platform_sample_count, i32 platform_samples_per_second, byte* platform_memory)

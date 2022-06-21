@@ -21,7 +21,9 @@ typedef  DirectSoundCreate_t(DirectSoundCreate_t);
 
 global vi2           g_client_dimensions             = { 0, 0 };
 global PlatformInput g_platform_input                = {};
+global i32           g_unfreed_file_data_counter     = 0;
 global i64           g_performance_counter_frequency =
+
 	[](void)
 	{
 		LARGE_INTEGER n;
@@ -75,7 +77,7 @@ internal HandmadeRalphDLL DEBUG_load_handmade_ralph_dll(void)
 }
 #endif
 
-PlatformReadFile_t(PlatformReadFile)
+PlatformReadFileData_t(PlatformReadFileData)
 {
 	HANDLE handle = CreateFileW(platform_file_path, GENERIC_READ, FILE_SHARE_READ, 0, OPEN_EXISTING, 0, 0);
 	if (handle == INVALID_HANDLE_VALUE)
@@ -92,44 +94,46 @@ PlatformReadFile_t(PlatformReadFile)
 		return false;
 	}
 
-	platform_file->size = static_cast<u64>(file_size.QuadPart),
-	platform_file->data = reinterpret_cast<byte*>(VirtualAlloc(0, platform_file->size, MEM_COMMIT, PAGE_READWRITE));
+	platform_file_data->size = static_cast<u64>(file_size.QuadPart),
+	platform_file_data->data = reinterpret_cast<byte*>(VirtualAlloc(0, platform_file_data->size, MEM_COMMIT, PAGE_READWRITE));
 
 	// @TODO@ Larger file sizes.
-	if (platform_file->size > 0xFFFFFFFF)
+	if (platform_file_data->size > 0xFFFFFFFF)
 	{
-		DEBUG_printf(__FUNCTION__ " :: File `%S` is too big (`%zu` bytes); must be less than 2^32 bytes (4.29GB).\n", platform_file_path, platform_file->size);
+		DEBUG_printf(__FUNCTION__ " :: File `%S` is too big (`%zu` bytes); must be less than 2^32 bytes (4.29GB).\n", platform_file_path, platform_file_data->size);
 		return false;
 	}
 
-	if (!platform_file->data)
+	if (!platform_file_data->data)
 	{
-		DEBUG_printf(__FUNCTION__ " :: Couldn't allocate `%zu` bytes for `%S`.\n", platform_file->size, platform_file_path);
+		DEBUG_printf(__FUNCTION__ " :: Couldn't allocate `%zu` bytes for `%S`.\n", platform_file_data->size, platform_file_path);
 		return false;
 	}
 
 	DWORD read_size;
-	if (!ReadFile(handle, platform_file->data, static_cast<u32>(platform_file->size), &read_size, 0))
+	if (!ReadFile(handle, platform_file_data->data, static_cast<u32>(platform_file_data->size), &read_size, 0))
 	{
 		DEBUG_printf(__FUNCTION__ " :: Couldn't read file `%S`.\n", platform_file_path);
-		VirtualFree(platform_file->data, 0, MEM_RELEASE);
+		VirtualFree(platform_file_data->data, 0, MEM_RELEASE);
 		return false;
 	}
 
-	if (read_size != platform_file->size)
+	if (read_size != platform_file_data->size)
 	{
-		DEBUG_printf(__FUNCTION__ " :: Incomplete read of `%ld` out of `%zu` bytes of `%S`.\n", read_size, platform_file->size, platform_file_path);
-		VirtualFree(platform_file->data, 0, MEM_RELEASE);
+		DEBUG_printf(__FUNCTION__ " :: Incomplete read of `%ld` out of `%zu` bytes of `%S`.\n", read_size, platform_file_data->size, platform_file_path);
+		VirtualFree(platform_file_data->data, 0, MEM_RELEASE);
 		return false;
 	}
 
+	g_unfreed_file_data_counter += 1;
 	return true;
 }
 
-PlatformFreeFile_t(PlatformFreeFile)
+PlatformFreeFileData_t(PlatformFreeFileData)
 {
-	ASSERT(platform_file->data);
-	VirtualFree(platform_file->data, 0, MEM_RELEASE);
+	ASSERT(platform_file_data->data);
+	VirtualFree(platform_file_data->data, 0, MEM_RELEASE);
+	g_unfreed_file_data_counter -= 1;
 }
 
 PlatformWriteFile_t(PlatformWriteFile)
@@ -488,19 +492,39 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int cmd_show)
 
 			if (message.message == WM_QUIT)
 			{
-				DEBUG_printf("Exit code : %llu\n", message.wParam);
-				return 0;
+				if (message.wParam)
+				{
+					DEBUG_printf(__FILE__ " :: Windows exit code `%llu`.\n", message.wParam);
+				}
+				goto BREAK;
 			}
 		}
 
 		poll_gamepads();
 
-		//
-		// Update.
-		//
-		// @TODO@ Platform-agnostic pixel-layout framebuffer.
+		PlatformInput* platform_input = &g_platform_input;
 
 		#if DEBUG
+		//
+		// (Debug) Pause.
+		//
+
+		{
+			DEBUG_persist bool32 is_paused = false;
+			if (BUTTON_DOWN(g_platform_input.button.alt) && BUTTON_PRESSES(g_platform_input.button.numbers[0]))
+			{
+				is_paused = !is_paused;
+			}
+			if (is_paused)
+			{
+				goto PAUSE_END;
+			}
+		}
+
+		//
+		// (Debug) Hotloading.
+		//
+
 		{
 			WIN32_FILE_ATTRIBUTE_DATA dll_attribute_data;
 			if
@@ -515,163 +539,160 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int cmd_show)
 			}
 		}
 
-		enum struct PlaybackState : u8
+		//
+		// (Debug) Playback.
+		//
+
 		{
-			null,
-			recording,
-			replaying
-		};
-
-		DEBUG_persist PlaybackState playback_state;
-		DEBUG_persist HANDLE        playback_file;
-		DEBUG_persist HANDLE        playback_file_mapping;
-		DEBUG_persist byte*         playback_data;
-		DEBUG_persist u64           playback_size;
-		DEBUG_persist i32           playback_input_index;
-
-		constexpr const wchar_t* PLAYBACK_FILE_PATH = EXE_DIR L"HandmadeRalph.playback";
-		lambda stop_playback =
-			[&]()
+			enum struct PlaybackState : u8
 			{
-				playback_state = PlaybackState::null;
-				if (playback_file != INVALID_HANDLE_VALUE)
-				{
-					CloseHandle(playback_file);
-					playback_file = INVALID_HANDLE_VALUE;
-				}
-				if (playback_file_mapping != INVALID_HANDLE_VALUE)
-				{
-					CloseHandle(playback_file_mapping);
-					playback_file_mapping = INVALID_HANDLE_VALUE;
-				}
-				if (playback_data)
-				{
-					UnmapViewOfFile(playback_data);
-					playback_data = 0;
-				}
+				null,
+				recording,
+				replaying
 			};
 
-		if (BUTTON_DOWN(g_platform_input.button.alt) && BUTTON_PRESSES(g_platform_input.button.numbers[1]))
-		{
-			switch (playback_state)
+			DEBUG_persist PlaybackState playback_state        = PlaybackState::null;
+			DEBUG_persist HANDLE        playback_file         = INVALID_HANDLE_VALUE;
+			DEBUG_persist HANDLE        playback_file_mapping = INVALID_HANDLE_VALUE;
+			DEBUG_persist byte*         playback_data         = 0;
+			DEBUG_persist u64           playback_size         = 0;
+			DEBUG_persist i32           playback_input_index  = 0;
+
+			constexpr const wchar_t* PLAYBACK_FILE_PATH = EXE_DIR L"HandmadeRalph.playback";
+			lambda stop_playback =
+				[&]()
+				{
+					playback_state = PlaybackState::null;
+					if (playback_file != INVALID_HANDLE_VALUE)
+					{
+						CloseHandle(playback_file);
+						playback_file = INVALID_HANDLE_VALUE;
+					}
+					if (playback_file_mapping != INVALID_HANDLE_VALUE)
+					{
+						CloseHandle(playback_file_mapping);
+						playback_file_mapping = INVALID_HANDLE_VALUE;
+					}
+					if (playback_data)
+					{
+						UnmapViewOfFile(playback_data);
+						playback_data = 0;
+					}
+				};
+
+			if (BUTTON_DOWN(g_platform_input.button.alt) && BUTTON_PRESSES(g_platform_input.button.numbers[1]))
 			{
-				case PlaybackState::null:
+				switch (playback_state)
 				{
-					playback_state = PlaybackState::recording;
-
-					playback_file = CreateFileW(PLAYBACK_FILE_PATH, GENERIC_READ | GENERIC_WRITE, 0, 0, CREATE_ALWAYS, 0, 0);
-					if (playback_file == INVALID_HANDLE_VALUE)
+					case PlaybackState::null:
 					{
-						DEBUG_printf(__FILE__ " :: Failed to create `%S` for playback.\n", PLAYBACK_FILE_PATH);
-						stop_playback();
-						break;
-					}
+						playback_state = PlaybackState::recording;
 
-					DWORD resulting_write_size;
-					if (!WriteFile(playback_file, platform_memory, PLATFORM_MEMORY_SIZE, &resulting_write_size, 0) || resulting_write_size != PLATFORM_MEMORY_SIZE)
+						playback_file = CreateFileW(PLAYBACK_FILE_PATH, GENERIC_READ | GENERIC_WRITE, 0, 0, CREATE_ALWAYS, 0, 0);
+						if (playback_file == INVALID_HANDLE_VALUE)
+						{
+							DEBUG_printf(__FILE__ " :: Failed to create `%S` for playback.\n", PLAYBACK_FILE_PATH);
+							stop_playback();
+							break;
+						}
+
+						DWORD resulting_write_size;
+						if (!WriteFile(playback_file, platform_memory, PLATFORM_MEMORY_SIZE, &resulting_write_size, 0) || resulting_write_size != PLATFORM_MEMORY_SIZE)
+						{
+							DEBUG_printf(__FILE__ " :: Recorded `%lu` out of `%zu` bytes of memory to `%S`; aborting playback.\n", resulting_write_size, PLATFORM_MEMORY_SIZE, PLAYBACK_FILE_PATH);
+							stop_playback();
+							break;
+						}
+
+						DEBUG_printf(__FILE__ " :: Recording `%S`.\n", PLAYBACK_FILE_PATH);
+					} break;
+
+					case PlaybackState::recording:
 					{
-						DEBUG_printf(__FILE__ " :: Recorded `%lu` out of `%zu` bytes of memory to `%S`; aborting playback.\n", resulting_write_size, PLATFORM_MEMORY_SIZE, PLAYBACK_FILE_PATH);
+						playback_state = PlaybackState::replaying;
+
+						playback_file_mapping = CreateFileMappingW(playback_file, 0, PAGE_READWRITE, 0, 0, 0);
+						if (playback_file_mapping == INVALID_HANDLE_VALUE)
+						{
+							DEBUG_printf(__FILE__ " :: Failed to file map `%S`; aborting playback.\n", PLAYBACK_FILE_PATH);
+							stop_playback();
+							break;
+						}
+
+						playback_data = reinterpret_cast<byte*>(MapViewOfFile(playback_file_mapping, FILE_MAP_READ, 0, 0, 0));
+						if (!playback_data)
+						{
+							DEBUG_printf(__FILE__ " :: Failed to get a map view of `%S`; aborting playback.\n", PLAYBACK_FILE_PATH);
+							stop_playback();
+							break;
+						}
+
+						LARGE_INTEGER playback_file_size;
+						if (GetFileSizeEx(playback_file, &playback_file_size))
+						{
+							playback_size = static_cast<u64>(playback_file_size.QuadPart);
+						}
+						else
+						{
+							DEBUG_printf(__FILE__ " :: Failed to get size of `%S`; aborting playback.\n", PLAYBACK_FILE_PATH);
+							stop_playback();
+							break;
+						}
+
+						ASSERT(playback_size > PLATFORM_MEMORY_SIZE);
+						ASSERT((playback_size - PLATFORM_MEMORY_SIZE) % sizeof(PlatformInput) == 0);
+
+						playback_input_index = 0;
+
+						DEBUG_printf(__FILE__ " :: Replaying `%S`.\n", PLAYBACK_FILE_PATH);
+					} break;
+
+					case PlaybackState::replaying:
+					{
 						stop_playback();
-						break;
-					}
+						DEBUG_printf(__FILE__ " :: Stopped `%S`.\n", PLAYBACK_FILE_PATH);
+					} break;
+				}
+			}
 
-					DEBUG_printf(__FILE__ " :: Recording `%S`.\n", PLAYBACK_FILE_PATH);
-				} break;
-
-				case PlaybackState::recording:
+			if (playback_state == PlaybackState::recording)
+			{
+				DWORD resulting_write_size;
+				if (!WriteFile(playback_file, &g_platform_input, sizeof(PlatformInput), &resulting_write_size, 0) || resulting_write_size != sizeof(PlatformInput))
 				{
-					playback_state = PlaybackState::replaying;
-
-					playback_file_mapping = CreateFileMappingW(playback_file, 0, PAGE_READWRITE, 0, 0, 0);
-					if (playback_file_mapping == INVALID_HANDLE_VALUE)
-					{
-						DEBUG_printf(__FILE__ " :: Failed to file map `%S`; aborting playback.\n", PLAYBACK_FILE_PATH);
-						stop_playback();
-						break;
-					}
-
-					playback_data = reinterpret_cast<byte*>(MapViewOfFile(playback_file_mapping, FILE_MAP_READ, 0, 0, 0));
-					if (!playback_data)
-					{
-						DEBUG_printf(__FILE__ " :: Failed to get a map view of `%S`; aborting playback.\n", PLAYBACK_FILE_PATH);
-						stop_playback();
-						break;
-					}
-
-					LARGE_INTEGER playback_file_size;
-					if (GetFileSizeEx(playback_file, &playback_file_size))
-					{
-						playback_size = static_cast<u64>(playback_file_size.QuadPart);
-					}
-					else
-					{
-						DEBUG_printf(__FILE__ " :: Failed to get size of `%S`; aborting playback.\n", PLAYBACK_FILE_PATH);
-						stop_playback();
-						break;
-					}
-
-					ASSERT(playback_size > PLATFORM_MEMORY_SIZE);
-					ASSERT((playback_size - PLATFORM_MEMORY_SIZE) % sizeof(PlatformInput) == 0);
-
-					playback_input_index = 0;
-
-					DEBUG_printf(__FILE__ " :: Replaying `%S`.\n", PLAYBACK_FILE_PATH);
-				} break;
-
-				case PlaybackState::replaying:
-				{
+					DEBUG_printf(__FILE__ " :: Recorded `%lu` out of `%zu` bytes of input to `%S`; aborting playback.\n", resulting_write_size, sizeof(PlatformInput), PLAYBACK_FILE_PATH);
 					stop_playback();
-					DEBUG_printf(__FILE__ " :: Stopped `%S`.\n", PLAYBACK_FILE_PATH);
-				} break;
+				}
 			}
-		}
-
-		if (playback_state == PlaybackState::recording)
-		{
-			DWORD resulting_write_size;
-			if (!WriteFile(playback_file, &g_platform_input, sizeof(PlatformInput), &resulting_write_size, 0) || resulting_write_size != sizeof(PlatformInput))
+			else if (playback_state == PlaybackState::replaying)
 			{
-				DEBUG_printf(__FILE__ " :: Recorded `%lu` out of `%zu` bytes of input to `%S`; aborting playback.\n", resulting_write_size, sizeof(PlatformInput), PLAYBACK_FILE_PATH);
-				stop_playback();
+				if (playback_input_index == 0)
+				{
+					memcpy(platform_memory, playback_data, PLATFORM_MEMORY_SIZE);
+				}
+
+				platform_input        = &reinterpret_cast<PlatformInput*>(playback_data + PLATFORM_MEMORY_SIZE)[playback_input_index];
+				playback_input_index += 1;
+				playback_input_index %= (playback_size - PLATFORM_MEMORY_SIZE) / sizeof(PlatformInput);
 			}
 		}
-
-		if (playback_state == PlaybackState::replaying)
-		{
-			if (playback_input_index == 0)
-			{
-				memcpy(platform_memory, playback_data, PLATFORM_MEMORY_SIZE);
-			}
-
-			handmade_ralph_dll.PlatformUpdate
-			(
-				reinterpret_cast<u32*>(backbuffer_bitmap_data),
-				{ BACKBUFFER_BITMAP_INFO.bmiHeader.biWidth, -BACKBUFFER_BITMAP_INFO.bmiHeader.biHeight },
-				&reinterpret_cast<PlatformInput*>(playback_data + PLATFORM_MEMORY_SIZE)[playback_input_index],
-				platform_memory,
-				SECONDS_PER_UPDATE,
-				PlatformReadFile,
-				PlatformFreeFile,
-				PlatformWriteFile
-			);
-			playback_input_index += 1;
-			playback_input_index %= (playback_size - PLATFORM_MEMORY_SIZE) / sizeof(PlatformInput);
-		}
-		else
 		#endif
-		{
-			handmade_ralph_dll.PlatformUpdate
-			(
-				reinterpret_cast<u32*>(backbuffer_bitmap_data),
-				{ BACKBUFFER_BITMAP_INFO.bmiHeader.biWidth, -BACKBUFFER_BITMAP_INFO.bmiHeader.biHeight },
-				&g_platform_input,
-				platform_memory,
-				SECONDS_PER_UPDATE,
-				PlatformReadFile,
-				PlatformFreeFile,
-				PlatformWriteFile
-			);
-		}
+
+		//
+		// Update.
+		//
+
+		handmade_ralph_dll.PlatformUpdate
+		(
+			reinterpret_cast<u32*>(backbuffer_bitmap_data),
+			{ BACKBUFFER_BITMAP_INFO.bmiHeader.biWidth, -BACKBUFFER_BITMAP_INFO.bmiHeader.biHeight },
+			platform_input,
+			platform_memory,
+			SECONDS_PER_UPDATE,
+			PlatformReadFileData,
+			PlatformFreeFileData,
+			PlatformWriteFile
+		);
 
 		//
 		// Sound.
@@ -763,6 +784,10 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int cmd_show)
 		// Flip and wait.
 		//
 
+		#if DEBUG
+		PAUSE_END:;
+		#endif
+
 		FOR_ELEMS(g_platform_input.buttons)
 		{
 			*it &= 0b10000000;
@@ -789,34 +814,36 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int cmd_show)
 			ReleaseDC(window, device_context);
 		}
 
-		// @TODO@ Remove spinlock.
-		// @TODO@ Gamepad polls are done after a sleep...
-		f32 computation_time = calc_performance_counter_delta_time(performance_counter_start, query_performance_counter());
-		if (computation_time < SECONDS_PER_UPDATE)
 		{
-			if (is_sleep_granular)
+			// @TODO@ Remove spinlock.
+			// @TODO@ Gamepad polls are done after a sleep...
+			f32 computation_time = calc_performance_counter_delta_time(performance_counter_start, query_performance_counter());
+			if (computation_time < SECONDS_PER_UPDATE)
 			{
-				while (SECONDS_PER_UPDATE - computation_time > 0.04f)
+				if (is_sleep_granular)
 				{
-					Sleep(1);
-					poll_gamepads();
-
-					computation_time = calc_performance_counter_delta_time(performance_counter_start, query_performance_counter());
-					if (computation_time >= SECONDS_PER_UPDATE)
+					while (SECONDS_PER_UPDATE - computation_time > 0.04f)
 					{
-						DEBUG_printf(__FILE__ " :: Missed frame from sleeping.\n");
+						Sleep(1);
+						poll_gamepads();
+
+						computation_time = calc_performance_counter_delta_time(performance_counter_start, query_performance_counter());
+						if (computation_time >= SECONDS_PER_UPDATE)
+						{
+							DEBUG_printf(__FILE__ " :: Missed frame from sleeping.\n");
+						}
 					}
 				}
-			}
 
-			while (computation_time < SECONDS_PER_UPDATE)
-			{
-				computation_time = calc_performance_counter_delta_time(performance_counter_start, query_performance_counter());
+				while (computation_time < SECONDS_PER_UPDATE)
+				{
+					computation_time = calc_performance_counter_delta_time(performance_counter_start, query_performance_counter());
+				}
 			}
-		}
-		else
-		{
-			DEBUG_printf(__FILE__ " :: Missed frame from computing.\n");
+			else
+			{
+				DEBUG_printf(__FILE__ " :: Missed frame from computing.\n");
+			}
 		}
 
 		#if 0
@@ -832,4 +859,13 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int cmd_show)
 		}
 		#endif
 	}
+	BREAK:;
+
+	if (g_unfreed_file_data_counter)
+	{
+		DEBUG_printf(__FILE__ " :: `%d` unfreed file data.\n", g_unfreed_file_data_counter);
+		return 1;
+	}
+
+	return 0;
 }
