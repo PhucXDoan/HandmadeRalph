@@ -513,15 +513,21 @@ internal constexpr vf2&   operator/=(      vf2& v, const i32& k) { return v = v 
 internal constexpr vf3&   operator/=(      vf3& v, const i32& k) { return v = v / k; }
 internal constexpr vf4&   operator/=(      vf4& v, const i32& k) { return v = v / k; }
 
-internal constexpr vf2    vxx(const vi2& v                            ) { return { static_cast<f32>(v.x), static_cast<f32>(v.y)                                               }; }
-internal constexpr vi2    vxx(const vf2& v                            ) { return { static_cast<i32>(v.x), static_cast<i32>(v.y)                                               }; }
-internal constexpr vf3    vxx(const vi3& v                            ) { return { static_cast<f32>(v.x), static_cast<f32>(v.y), static_cast<f32>(v.z)                        }; }
-internal constexpr vi3    vxx(const vf3& v                            ) { return { static_cast<i32>(v.x), static_cast<i32>(v.y), static_cast<i32>(v.z)                        }; }
-internal constexpr vf4    vxx(const vi4& v                            ) { return { static_cast<f32>(v.x), static_cast<f32>(v.y), static_cast<f32>(v.z), static_cast<f32>(v.w) }; }
-internal constexpr vi4    vxx(const vf4& v                            ) { return { static_cast<i32>(v.x), static_cast<i32>(v.y), static_cast<i32>(v.z), static_cast<i32>(v.w) }; }
-internal constexpr vf3    vxx(const vf2& v, const f32& a              ) { return { v.x, v.y,   a    }; }
-internal constexpr vf4    vxx(const vf2& v, const f32& a, const f32& b) { return { v.x, v.y,   a, b }; }
-internal constexpr vf4    vxx(const vf3& v, const f32& a              ) { return { v.x, v.y, v.z, a }; }
+internal constexpr vf2    vxx(const vi2& v                                          ) { return { static_cast<f32>(v.x), static_cast<f32>(v.y)                                               }; }
+internal constexpr vi2    vxx(const vf2& v                                          ) { return { static_cast<i32>(v.x), static_cast<i32>(v.y)                                               }; }
+internal constexpr vf3    vxx(const vi3& v                                          ) { return { static_cast<f32>(v.x), static_cast<f32>(v.y), static_cast<f32>(v.z)                        }; }
+internal constexpr vi3    vxx(const vf3& v                                          ) { return { static_cast<i32>(v.x), static_cast<i32>(v.y), static_cast<i32>(v.z)                        }; }
+internal constexpr vf4    vxx(const vi4& v                                          ) { return { static_cast<f32>(v.x), static_cast<f32>(v.y), static_cast<f32>(v.z), static_cast<f32>(v.w) }; }
+internal constexpr vi4    vxx(const vf4& v                                          ) { return { static_cast<i32>(v.x), static_cast<i32>(v.y), static_cast<i32>(v.z), static_cast<i32>(v.w) }; }
+internal constexpr vf2    vxx(const i32& x, const i32& y                            ) { return { static_cast<f32>(x), static_cast<f32>(y)                                           }; }
+internal constexpr vi2    vxx(const f32& x, const f32& y                            ) { return { static_cast<i32>(x), static_cast<i32>(y)                                           }; }
+internal constexpr vf3    vxx(const i32& x, const i32& y, const i32& z              ) { return { static_cast<f32>(x), static_cast<f32>(y), static_cast<f32>(z)                      }; }
+internal constexpr vi3    vxx(const f32& x, const f32& y, const f32& z              ) { return { static_cast<i32>(x), static_cast<i32>(y), static_cast<i32>(z)                      }; }
+internal constexpr vf4    vxx(const i32& x, const i32& y, const i32& z, const i32& w) { return { static_cast<f32>(x), static_cast<f32>(y), static_cast<f32>(z), static_cast<f32>(w) }; }
+internal constexpr vi4    vxx(const f32& x, const f32& y, const f32& z, const f32& w) { return { static_cast<i32>(x), static_cast<i32>(y), static_cast<i32>(z), static_cast<i32>(w) }; }
+internal constexpr vf3    vxx(const vf2& v, const f32& a                            ) { return { v.x, v.y,   a    }; }
+internal constexpr vf4    vxx(const vf2& v, const f32& a, const f32& b              ) { return { v.x, v.y,   a, b }; }
+internal constexpr vf4    vxx(const vf3& v, const f32& a                            ) { return { v.x, v.y, v.z, a }; }
 
 internal constexpr vf2    vx2(const f32& a) { return { a, a       }; }
 internal constexpr vi2    vx2(const i32& a) { return { a, a       }; }
@@ -530,22 +536,29 @@ internal constexpr vi3    vx3(const i32& a) { return { a, a, a    }; }
 internal constexpr vf4    vx4(const f32& a) { return { a, a, a, a }; }
 internal constexpr vi4    vx4(const i32& a) { return { a, a, a, a }; }
 
-#define VXX_COLOR_F3_(C0, C1, C2)     (static_cast<u32>(static_cast<u8>(MACRO_CONCAT(v., C0) * 255.0f) << 16) | static_cast<u32>(static_cast<u8>(MACRO_CONCAT(v., C1) * 255.0f) <<  8) | static_cast<u32>(static_cast<u8>(MACRO_CONCAT(v., C2) * 255.0f) << 0))
-#define VXX_COLOR_F4_(C0, C1, C2, C3) (static_cast<u32>(static_cast<u8>(MACRO_CONCAT(v., C0) * 255.0f) << 24) | static_cast<u32>(static_cast<u8>(MACRO_CONCAT(v., C1) * 255.0f) << 16) | static_cast<u32>(static_cast<u8>(MACRO_CONCAT(v., C2) * 255.0f) << 8) | static_cast<u32>(static_cast<u8>(MACRO_CONCAT(v., C3) * 255.0f) << 0))
-#define VXX_COLOR_I3_(C0, C1, C2)     (static_cast<u32>(static_cast<u8>(MACRO_CONCAT(v., C0)) << 16) | static_cast<u32>(static_cast<u8>(MACRO_CONCAT(v., C1)) <<  8) | static_cast<u32>(static_cast<u8>(MACRO_CONCAT(v., C2)) << 0))
-#define VXX_COLOR_I4_(C0, C1, C2, C3) (static_cast<u32>(static_cast<u8>(MACRO_CONCAT(v., C0)) << 24) | static_cast<u32>(static_cast<u8>(MACRO_CONCAT(v., C1)) << 16) | static_cast<u32>(static_cast<u8>(MACRO_CONCAT(v., C2)) << 8) | static_cast<u32>(static_cast<u8>(MACRO_CONCAT(v., C3)) << 0))
-internal constexpr u32 vxx_argb(const vf3& v) { return VXX_COLOR_F3_(   x, y, z); };
-internal constexpr u32 vxx_argb(const vf4& v) { return VXX_COLOR_F4_(w, x, y, z); };
-internal constexpr u32 vxx_argb(const vi3& v) { return VXX_COLOR_I3_(   x, y, z); };
-internal constexpr u32 vxx_argb(const vi4& v) { return VXX_COLOR_I4_(w, x, y, z); };
-internal constexpr u32 vxx_rgba(const vf3& v) { return VXX_COLOR_F3_(x, y, z   ); };
-internal constexpr u32 vxx_rgba(const vf4& v) { return VXX_COLOR_F4_(x, y, z, w); };
-internal constexpr u32 vxx_rgba(const vi3& v) { return VXX_COLOR_I3_(x, y, z   ); };
-internal constexpr u32 vxx_rgba(const vi4& v) { return VXX_COLOR_I4_(x, y, z, w); };
-#undef VXX_COLOR_F3_
-#undef VXX_COLOR_F4_
-#undef VXX_COLOR_I3_
-#undef VXX_COLOR_I4_
+#define VXX_COLOR_SHUFFLE_F32_(C0, C1, C2, C3) ((static_cast<u32>(static_cast<u8>((C0) * 255.0f)) << 24) | (static_cast<u32>(static_cast<u8>((C1) * 255.0f)) << 16) | (static_cast<u32>(static_cast<u8>((C2) * 255.0f)) << 8) | (static_cast<u32>(static_cast<u8>((C3) * 255.0f)) << 0))
+#define VXX_COLOR_SHUFFLE_I32_(C0, C1, C2, C3) ((static_cast<u32>(static_cast<u8>((C0)         )) << 24) | (static_cast<u32>(static_cast<u8>((C1)         )) << 16) | (static_cast<u32>(static_cast<u8>((C2)         )) << 8) | (static_cast<u32>(static_cast<u8>((C3)         )) << 0))
+internal constexpr u32 vxx_argb(const vf3& v) { return VXX_COLOR_SHUFFLE_F32_(  0, v.x, v.y, v.z); };
+internal constexpr u32 vxx_argb(const vi3& v) { return VXX_COLOR_SHUFFLE_I32_(  0, v.x, v.y, v.z); };
+internal constexpr u32 vxx_argb(const vf4& v) { return VXX_COLOR_SHUFFLE_F32_(v.w, v.x, v.y, v.z); };
+internal constexpr u32 vxx_argb(const vi4& v) { return VXX_COLOR_SHUFFLE_I32_(v.w, v.x, v.y, v.z); };
+
+internal constexpr u32 vxx_rgba(const vf3& v) { return VXX_COLOR_SHUFFLE_F32_(v.x, v.y, v.z,   0); };
+internal constexpr u32 vxx_rgba(const vi3& v) { return VXX_COLOR_SHUFFLE_I32_(v.x, v.y, v.z,   0); };
+internal constexpr u32 vxx_rgba(const vf4& v) { return VXX_COLOR_SHUFFLE_F32_(v.x, v.y, v.z, v.w); };
+internal constexpr u32 vxx_rgba(const vi4& v) { return VXX_COLOR_SHUFFLE_I32_(v.x, v.y, v.z, v.w); };
+
+internal constexpr u32 vxx_argb(const f32& x, const f32& y, const f32& z              ) { return VXX_COLOR_SHUFFLE_F32_(0, x, y, z); };
+internal constexpr u32 vxx_argb(const i32& x, const i32& y, const i32& z              ) { return VXX_COLOR_SHUFFLE_I32_(0, x, y, z); };
+internal constexpr u32 vxx_argb(const f32& x, const f32& y, const f32& z, const f32& w) { return VXX_COLOR_SHUFFLE_F32_(w, x, y, z); };
+internal constexpr u32 vxx_argb(const i32& x, const i32& y, const i32& z, const i32& w) { return VXX_COLOR_SHUFFLE_I32_(w, x, y, z); };
+
+internal constexpr u32 vxx_rgba(const f32& x, const f32& y, const f32& z              ) { return VXX_COLOR_SHUFFLE_F32_(x, y, z, 0); };
+internal constexpr u32 vxx_rgba(const i32& x, const i32& y, const i32& z              ) { return VXX_COLOR_SHUFFLE_I32_(x, y, z, 0); };
+internal constexpr u32 vxx_rgba(const f32& x, const f32& y, const f32& z, const f32& w) { return VXX_COLOR_SHUFFLE_F32_(x, y, z, w); };
+internal constexpr u32 vxx_rgba(const i32& x, const i32& y, const i32& z, const i32& w) { return VXX_COLOR_SHUFFLE_I32_(x, y, z, w); };
+#undef VXX_COLOR_SHUFFLE_F32_
+#undef VXX_COLOR_SHUFFLE_I32_
 
 template <typename TYPE>
 i32 sign(const TYPE& x)
@@ -573,10 +586,10 @@ internal vf2 rotate(const vf2& v, const f32& angle)
 	return { v.x * p.x - v.y * p.y, v.x * p.y + v.y * p.x };
 }
 
-internal constexpr f32 dampen(const f32& a, const f32& b, const f32& k, const f32& dt) { return lerp(a, b, 1.0f - expf(-k * dt)); }
-internal constexpr vf2 dampen(const vf2& a, const vf2& b, const f32& k, const f32& dt) { return lerp(a, b, 1.0f - expf(-k * dt)); }
-internal constexpr vf3 dampen(const vf3& a, const vf3& b, const f32& k, const f32& dt) { return lerp(a, b, 1.0f - expf(-k * dt)); }
-internal constexpr vf4 dampen(const vf4& a, const vf4& b, const f32& k, const f32& dt) { return lerp(a, b, 1.0f - expf(-k * dt)); }
+internal f32 dampen(const f32& a, const f32& b, const f32& k, const f32& dt) { return b + (a - b) * powf(k, dt); }
+internal vf2 dampen(const vf2& a, const vf2& b, const f32& k, const f32& dt) { return b + (a - b) * powf(k, dt); }
+internal vf3 dampen(const vf3& a, const vf3& b, const f32& k, const f32& dt) { return b + (a - b) * powf(k, dt); }
+internal vf4 dampen(const vf4& a, const vf4& b, const f32& k, const f32& dt) { return b + (a - b) * powf(k, dt); }
 
 internal constexpr f32 dot(const vf2& u, const vf2& v) { return u.x * v.x + u.y * v.y;                         }
 internal constexpr f32 dot(const vf3& u, const vf3& v) { return u.x * v.x + u.y * v.y + u.z * v.z;             }

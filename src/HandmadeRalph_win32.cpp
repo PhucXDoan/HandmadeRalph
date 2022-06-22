@@ -335,6 +335,7 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int cmd_show)
 			.style         = CS_HREDRAW | CS_VREDRAW,
 			.lpfnWndProc   = window_procedure_callback,
 			.hInstance     = instance,
+			.hCursor       = LoadCursor(0, IDC_CROSS),
 			.lpszClassName = CLASS_NAME
 		};
 
@@ -344,7 +345,18 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int cmd_show)
 		return -1;
 	}
 
-	HWND window = CreateWindowExW(0, CLASS_NAME, L"Handmade Ralph", WS_OVERLAPPEDWINDOW | WS_VISIBLE, CW_USEDEFAULT, CW_USEDEFAULT, BACKBUFFER_BITMAP_INFO.bmiHeader.biWidth, -BACKBUFFER_BITMAP_INFO.bmiHeader.biHeight, 0, 0, instance, 0);
+	constexpr DWORD WINDOW_STYLE = WS_OVERLAPPEDWINDOW | WS_VISIBLE;
+
+	HWND window;
+	{
+		RECT rect = { 0, 0, BACKBUFFER_BITMAP_INFO.bmiHeader.biWidth, -BACKBUFFER_BITMAP_INFO.bmiHeader.biHeight };
+		if (!AdjustWindowRect(&rect, WINDOW_STYLE, false))
+		{
+			ASSERT(!"Failed to calculate window dimnesions.");
+			return -1;
+		}
+		window = CreateWindowExW(0, CLASS_NAME, L"Handmade Ralph", WINDOW_STYLE, CW_USEDEFAULT, CW_USEDEFAULT, rect.right - rect.left, rect.bottom - rect.top, 0, 0, instance, 0);
+	}
 	if (!window)
 	{
 		ASSERT(!"Failed to create window.");
@@ -461,9 +473,9 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int cmd_show)
 	// Miscellaneous initializations.
 	//
 
-	constexpr f32        SECONDS_PER_UPDATE              = 1.0f / 30.0f;
-	constexpr i32        SAMPLES_OF_LATENCY              = SAMPLES_PER_SECOND / 30;
+	constexpr f32        SECONDS_PER_UPDATE              = 1.0f / 24.0f;
 	constexpr i32        MAXIMUM_SAMPLES_PER_UPDATE      = static_cast<i32>(SAMPLES_PER_SECOND * SECONDS_PER_UPDATE + 1);
+	constexpr i32        SAMPLES_OF_LATENCY              = max(MAXIMUM_SAMPLES_PER_UPDATE, SAMPLES_PER_SECOND / 30);
 	constexpr i32        PLATFORM_SAMPLE_BUFFER_CAPACITY = 4 * MAXIMUM_SAMPLES_PER_UPDATE;
 
 	bool32          is_sleep_granular      = timeBeginPeriod(1) == TIMERR_NOERROR;
@@ -702,17 +714,25 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int cmd_show)
 		// Update.
 		//
 
-		handmade_ralph_dll.PlatformUpdate
-		(
-			reinterpret_cast<u32*>(backbuffer_bitmap_data),
-			{ BACKBUFFER_BITMAP_INFO.bmiHeader.biWidth, -BACKBUFFER_BITMAP_INFO.bmiHeader.biHeight },
-			platform_input,
-			platform_memory,
-			SECONDS_PER_UPDATE,
-			PlatformReadFileData,
-			PlatformFreeFileData,
-			PlatformWriteFile
-		);
+		{
+			// @TODO@ Platform-agnostic pixel-layout framebuffer.
+			PlatformFramebuffer platform_framebuffer =
+				{
+					.dimensions = { BACKBUFFER_BITMAP_INFO.bmiHeader.biWidth, -BACKBUFFER_BITMAP_INFO.bmiHeader.biHeight },
+					.pixels     = reinterpret_cast<u32*>(backbuffer_bitmap_data)
+				};
+
+			handmade_ralph_dll.PlatformUpdate
+			(
+				&platform_framebuffer,
+				platform_input,
+				platform_memory,
+				SECONDS_PER_UPDATE,
+				PlatformReadFileData,
+				PlatformFreeFileData,
+				PlatformWriteFile
+			);
+		}
 
 		//
 		// Sound.
