@@ -3,13 +3,14 @@
 #pragma warning(push)
 #pragma warning(disable : 5039 4820)
 #include <windows.h>
+#include <windowsx.h>
 #include <xinput.h>
 #include <dsound.h>
 #pragma warning(pop)
 #include "unified.h"
 #include "platform.h"
 
-#define PROCESS_PLATFORM_BUTTON(BUTTON, IS_DOWN) MACRO_CONCAT(g_platform_input.button, BUTTON) = static_cast<u8>(((MACRO_CONCAT(g_platform_input.button, BUTTON) + ((MACRO_CONCAT(g_platform_input.button, BUTTON) >> 7) != (IS_DOWN))) & 0b01111111) | ((IS_DOWN) << 7))
+#define PROCESS_PLATFORM_BUTTON(BUTTON, IS_DOWN) MACRO_CONCAT(g_platform_input.button, BUTTON) = static_cast<u8>(((MACRO_CONCAT(g_platform_input.button, BUTTON) + ((MACRO_CONCAT(g_platform_input.button, BUTTON) >> 7) != static_cast<bool8>(IS_DOWN))) & 0b01111111) | ((IS_DOWN) << 7))
 
 #define  XInputGetState_t(NAME) DWORD NAME(DWORD dwUserIndex, XINPUT_STATE *pState)
 typedef  XInputGetState_t(XInputGetState_t);
@@ -230,7 +231,6 @@ internal LRESULT window_procedure_callback(HWND window, UINT message, WPARAM wpa
 		case WM_CLOSE:
 		{
 			PostQuitMessage(0);
-			return 0;
 		} break;
 
 		case WM_SIZE:
@@ -238,7 +238,6 @@ internal LRESULT window_procedure_callback(HWND window, UINT message, WPARAM wpa
 			RECT client_rect;
 			GetClientRect(window, &client_rect);
 			g_client_dimensions = { client_rect.right - client_rect.left, client_rect.bottom - client_rect.top };
-			return 0;
 		} break;
 
 		case WM_PAINT:
@@ -249,7 +248,6 @@ internal LRESULT window_procedure_callback(HWND window, UINT message, WPARAM wpa
 			// @TODO@ Paint here...?
 
 			EndPaint(window, &paint);
-			return 0;
 		} break;
 
 		case WM_SYSKEYDOWN:
@@ -273,13 +271,13 @@ internal LRESULT window_procedure_callback(HWND window, UINT message, WPARAM wpa
 				{
 					switch (wparam)
 					{
-						case VK_LEFT   : { PROCESS_PLATFORM_BUTTON(.arrow_left,  is_down); } break;
-						case VK_RIGHT  : { PROCESS_PLATFORM_BUTTON(.arrow_right, is_down); } break;
-						case VK_DOWN   : { PROCESS_PLATFORM_BUTTON(.arrow_down,  is_down); } break;
-						case VK_UP     : { PROCESS_PLATFORM_BUTTON(.arrow_up,    is_down); } break;
-						case VK_RETURN : { PROCESS_PLATFORM_BUTTON(.enter,       is_down); } break;
-						case VK_SHIFT  : { PROCESS_PLATFORM_BUTTON(.shift,       is_down); } break;
-						case VK_MENU   : { PROCESS_PLATFORM_BUTTON(.alt,         is_down); } break;
+						case VK_LEFT   : PROCESS_PLATFORM_BUTTON(.arrow_left,  is_down); break;
+						case VK_RIGHT  : PROCESS_PLATFORM_BUTTON(.arrow_right, is_down); break;
+						case VK_DOWN   : PROCESS_PLATFORM_BUTTON(.arrow_down,  is_down); break;
+						case VK_UP     : PROCESS_PLATFORM_BUTTON(.arrow_up,    is_down); break;
+						case VK_RETURN : PROCESS_PLATFORM_BUTTON(.enter,       is_down); break;
+						case VK_SHIFT  : PROCESS_PLATFORM_BUTTON(.shift,       is_down); break;
+						case VK_MENU   : PROCESS_PLATFORM_BUTTON(.alt,         is_down); break;
 						case VK_F4:
 						{
 							if (lparam & (1 << 29))
@@ -290,9 +288,16 @@ internal LRESULT window_procedure_callback(HWND window, UINT message, WPARAM wpa
 					}
 				}
 			}
+		} break;
 
+		case WM_LBUTTONDOWN : PROCESS_PLATFORM_BUTTON(.mouse_left , true ); break;
+		case WM_LBUTTONUP   : PROCESS_PLATFORM_BUTTON(.mouse_left , false); break;
+		case WM_RBUTTONDOWN : PROCESS_PLATFORM_BUTTON(.mouse_right, true ); break;
+		case WM_RBUTTONUP   : PROCESS_PLATFORM_BUTTON(.mouse_right, false); break;
 
-			return 0;
+		case WM_MOUSEWHEEL:
+		{
+			g_platform_input.mouse_scroll = GET_WHEEL_DELTA_WPARAM(wparam);
 		} break;
 
 		default:
@@ -300,6 +305,8 @@ internal LRESULT window_procedure_callback(HWND window, UINT message, WPARAM wpa
 			return DefWindowProc(window, message, wparam, lparam);
 		} break;
 	}
+
+	return 0;
 }
 
 int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int cmd_show)
@@ -308,7 +315,19 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int cmd_show)
 	// Initialize window.
 	//
 
-	constexpr wchar_t CLASS_NAME[] = L"HandemadeRalphWindowClass";
+	constexpr wchar_t    CLASS_NAME[]           = L"HandemadeRalphWindowClass";
+	constexpr BITMAPINFO BACKBUFFER_BITMAP_INFO =
+		{
+			.bmiHeader =
+				{
+					.biSize        = sizeof(BACKBUFFER_BITMAP_INFO.bmiHeader),
+					.biWidth       =  1080,
+					.biHeight      = -720,
+					.biPlanes      = 1,
+					.biBitCount    = 32,
+					.biCompression = BI_RGB
+				}
+		};
 
 	WNDCLASSEXW window_class =
 		{
@@ -325,7 +344,7 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int cmd_show)
 		return -1;
 	}
 
-	HWND window = CreateWindowExW(0, CLASS_NAME, L"Handmade Ralph", WS_OVERLAPPEDWINDOW | WS_VISIBLE, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, 0, 0, instance, 0);
+	HWND window = CreateWindowExW(0, CLASS_NAME, L"Handmade Ralph", WS_OVERLAPPEDWINDOW | WS_VISIBLE, CW_USEDEFAULT, CW_USEDEFAULT, BACKBUFFER_BITMAP_INFO.bmiHeader.biWidth, -BACKBUFFER_BITMAP_INFO.bmiHeader.biHeight, 0, 0, instance, 0);
 	if (!window)
 	{
 		ASSERT(!"Failed to create window.");
@@ -446,18 +465,6 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int cmd_show)
 	constexpr i32        SAMPLES_OF_LATENCY              = SAMPLES_PER_SECOND / 30;
 	constexpr i32        MAXIMUM_SAMPLES_PER_UPDATE      = static_cast<i32>(SAMPLES_PER_SECOND * SECONDS_PER_UPDATE + 1);
 	constexpr i32        PLATFORM_SAMPLE_BUFFER_CAPACITY = 4 * MAXIMUM_SAMPLES_PER_UPDATE;
-	constexpr BITMAPINFO BACKBUFFER_BITMAP_INFO          =
-		{
-			.bmiHeader =
-				{
-					.biSize        = sizeof(BACKBUFFER_BITMAP_INFO.bmiHeader),
-					.biWidth       =  1080,
-					.biHeight      = -720,
-					.biPlanes      = 1,
-					.biBitCount    = 32,
-					.biCompression = BI_RGB
-				}
-		};
 
 	bool32          is_sleep_granular      = timeBeginPeriod(1) == TIMERR_NOERROR;
 	byte*           backbuffer_bitmap_data = reinterpret_cast<byte*>(VirtualAlloc(0, static_cast<size_t>(4) * BACKBUFFER_BITMAP_INFO.bmiHeader.biWidth * -BACKBUFFER_BITMAP_INFO.bmiHeader.biHeight, MEM_COMMIT, PAGE_READWRITE));
@@ -497,6 +504,19 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int cmd_show)
 					DEBUG_printf(__FILE__ " :: Windows exit code `%llu`.\n", message.wParam);
 				}
 				goto BREAK;
+			}
+		}
+
+		{
+			POINT point;
+			if (GetCursorPos(&point) && ScreenToClient(window, &point))
+			{
+				g_platform_input.mouse_delta = vi2 { point.x, point.y } - g_platform_input.mouse;
+				g_platform_input.mouse       =     { point.x, point.y };
+			}
+			else
+			{
+				DEBUG_printf(__FILE__ " :: Failed to get mouse position.\n");
 			}
 		}
 
@@ -793,6 +813,8 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int cmd_show)
 			*it &= 0b10000000;
 		}
 
+		g_platform_input.mouse_scroll = 0; // @NOTE@ @TODO@ Might be zeroed out while still scrolling.
+
 		{
 			HDC device_context = GetDC(window);
 			StretchDIBits
@@ -800,8 +822,8 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int cmd_show)
 				device_context,
 				0,
 				0,
-				g_client_dimensions.x,
-				g_client_dimensions.y,
+				BACKBUFFER_BITMAP_INFO.bmiHeader.biWidth,
+				-BACKBUFFER_BITMAP_INFO.bmiHeader.biHeight,
 				0,
 				0,
 				BACKBUFFER_BITMAP_INFO.bmiHeader.biWidth,
@@ -842,7 +864,7 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int cmd_show)
 			}
 			else
 			{
-				DEBUG_printf(__FILE__ " :: Missed frame from computing.\n");
+				DEBUG_printf(__FILE__ " :: Missed frame from computing or stall.\n");
 			}
 		}
 

@@ -49,7 +49,7 @@ PlatformUpdate_t(PlatformUpdate)
 		}
 	}
 
-	//DEBUG_printf("down %d | presses %d | releases %d\n", BTN_DOWN(.letters[0]), BTN_PRESSES(.letters[0]), BTN_RELEASES(.letters[0]));
+	//DEBUG_printf("down %d | presses %d | releases %d | %d %d (%d %d) %d\n", BTN_DOWN(.mouse_left), BTN_PRESSES(.mouse_left), BTN_RELEASES(.mouse_left), PASS_V2(platform_input->mouse), PASS_V2(platform_input->mouse_delta), platform_input->mouse_scroll);
 
 	state->t = fmodf(state->t, TAU);
 }

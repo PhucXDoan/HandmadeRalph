@@ -57,6 +57,8 @@ struct PlatformInput
 			u8 enter;
 			u8 shift;
 			u8 alt;
+			u8 mouse_left;
+			u8 mouse_right;
 		} button;
 
 		u8 buttons[sizeof(button) / sizeof(u8)];
@@ -70,6 +72,10 @@ struct PlatformInput
 		vf2    stick_left;
 		vf2    stick_right;
 	} gamepads[PLATFORM_GAMEPAD_MAX];
+
+	vi2 mouse;
+	vi2 mouse_delta;
+	i32 mouse_scroll;
 };
 
 struct PlatformFileData
