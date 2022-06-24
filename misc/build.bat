@@ -4,7 +4,7 @@ setlocal ENABLEDELAYEDEXPANSION
 set DEBUG=1
 set WARNINGS=/W4 /Wall /wd4201 /wd5219 /wd4668 /wd5045 /wd4711
 set DEBUG_WARNINGS=%WARNINGS% /wd4505 /wd4100 /wd4101 /wd4514 /wd4189 /wd4191 /wd4820 /wd4710
-set LIBRARIES=user32.lib gdi32.lib winmm.lib
+set LIBRARIES=user32.lib gdi32.lib winmm.lib dxgi.lib
 
 IF NOT EXIST W:\build\ (
 	mkdir W:\build\

@@ -1,6 +1,8 @@
 #include "unified.h"
 #include "platform.h"
 
+#define DEBUG_AUDIO 0
+
 constexpr f32 PIXELS_PER_METER = 50.0f;
 
 struct Wall
@@ -24,9 +26,10 @@ struct State
 	vf2    hero_position;
 	vf2    hero_velocity;
 
-	//f32    hertz;
-	//vi2    offset;
-	//f32    t;
+	#if DEBUG_AUDIO
+	f32    hertz;
+	f32    t;
+	#endif
 };
 static_assert(sizeof(State) < PLATFORM_MEMORY_SIZE / 4);
 
@@ -333,37 +336,17 @@ PlatformUpdate_t(PlatformUpdate)
 		{ 0.9f, 0.5f, 0.1f }
 	);
 
-	#if 0
-	DEBUG_printf("%d %d\n", PASS_V2(platform_input->mouse));
+	#if DEBUG_AUDIO
+	//DEBUG_printf("%d %d\n", PASS_V2(platform_input->mouse));
 
-	state->offset.x += static_cast<i32>(200.0f * platform_delta_time);
-	state->offset   += vxx(200.0f * platform_input->gamepads[0].stick_left * platform_delta_time);
-
-	if (BTN_DOWN(.gamepads[0].action_left))
-	{
-		state->offset.x -= 1;
-	}
-	if (BTN_DOWN(.gamepads[0].action_right))
-	{
-		state->offset.x += 1;
-	}
-	if (BTN_DOWN(.gamepads[0].action_down))
-	{
-		state->offset.y += 1;
-	}
-	if (BTN_DOWN(.gamepads[0].action_up))
-	{
-		state->offset.y -= 1;
-	}
 	state->hertz = 512.0f + platform_input->gamepads[0].stick_right.y * 100.0f;
-
-	state->t = fmodf(state->t, TAU);
+	state->t     = fmodf(state->t, TAU);
 	#endif
 }
 
 PlatformSound_t(PlatformSound)
 {
-	#if 0
+	#if DEBUG_AUDIO
 	State* state = reinterpret_cast<State*>(platform_memory);
 
 	FOR_ELEMS(sample, platform_sample_buffer, platform_sample_count)
