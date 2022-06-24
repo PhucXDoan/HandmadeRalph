@@ -614,49 +614,32 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int cmd_show)
 
 			if (BUTTON_DOWN(g_platform_input.button.alt) && BUTTON_PRESSES(g_platform_input.button.numbers[1]))
 			{
-				switch (playback_state)
+				if (BUTTON_DOWN(g_platform_input.button.shift))
 				{
-					case PlaybackState::null:
+					if (playback_state == PlaybackState::null)
 					{
-						playback_state = PlaybackState::recording;
-
-						playback_file = CreateFileW(PLAYBACK_FILE_PATH, GENERIC_READ | GENERIC_WRITE, 0, 0, CREATE_ALWAYS, 0, 0);
+						playback_file = CreateFileW(PLAYBACK_FILE_PATH, GENERIC_READ, 0, 0, OPEN_EXISTING, 0, 0);
 						if (playback_file == INVALID_HANDLE_VALUE)
 						{
-							DEBUG_printf(__FILE__ " :: Failed to create `%S` for playback.\n", PLAYBACK_FILE_PATH);
+							DEBUG_printf(__FILE__ " :: Failed to reload `%S` for playback.\n", PLAYBACK_FILE_PATH);
 							stop_playback();
-							break;
+							goto ABORT_PLAYBACK;
 						}
 
-						DWORD resulting_write_size;
-						if (!WriteFile(playback_file, platform_memory, PLATFORM_MEMORY_SIZE, &resulting_write_size, 0) || resulting_write_size != PLATFORM_MEMORY_SIZE)
-						{
-							DEBUG_printf(__FILE__ " :: Recorded `%lu` out of `%zu` bytes of memory to `%S`; aborting playback.\n", resulting_write_size, PLATFORM_MEMORY_SIZE, PLAYBACK_FILE_PATH);
-							stop_playback();
-							break;
-						}
-
-						DEBUG_printf(__FILE__ " :: Recording `%S`.\n", PLAYBACK_FILE_PATH);
-					} break;
-
-					case PlaybackState::recording:
-					{
-						playback_state = PlaybackState::replaying;
-
-						playback_file_mapping = CreateFileMappingW(playback_file, 0, PAGE_READWRITE, 0, 0, 0);
+						playback_file_mapping = CreateFileMappingW(playback_file, 0, PAGE_READONLY, 0, 0, 0);
 						if (playback_file_mapping == INVALID_HANDLE_VALUE)
 						{
-							DEBUG_printf(__FILE__ " :: Failed to file map `%S`; aborting playback.\n", PLAYBACK_FILE_PATH);
+							DEBUG_printf(__FILE__ " :: Failed to file map `%S`; aborting reloaded playback.\n", PLAYBACK_FILE_PATH);
 							stop_playback();
-							break;
+							goto ABORT_PLAYBACK;
 						}
 
 						playback_data = reinterpret_cast<byte*>(MapViewOfFile(playback_file_mapping, FILE_MAP_READ, 0, 0, 0));
 						if (!playback_data)
 						{
-							DEBUG_printf(__FILE__ " :: Failed to get a map view of `%S`; aborting playback.\n", PLAYBACK_FILE_PATH);
+							DEBUG_printf(__FILE__ " :: Failed to get a map view of `%S`; aborting reloaded playback.\n", PLAYBACK_FILE_PATH);
 							stop_playback();
-							break;
+							goto ABORT_PLAYBACK;
 						}
 
 						LARGE_INTEGER playback_file_size;
@@ -666,9 +649,9 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int cmd_show)
 						}
 						else
 						{
-							DEBUG_printf(__FILE__ " :: Failed to get size of `%S`; aborting playback.\n", PLAYBACK_FILE_PATH);
+							DEBUG_printf(__FILE__ " :: Failed to get size of `%S`; aborting reloaded playback.\n", PLAYBACK_FILE_PATH);
 							stop_playback();
-							break;
+							goto ABORT_PLAYBACK;
 						}
 
 						ASSERT(playback_size > PLATFORM_MEMORY_SIZE);
@@ -676,16 +659,90 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int cmd_show)
 
 						playback_input_index = 0;
 
-						DEBUG_printf(__FILE__ " :: Replaying `%S`.\n", PLAYBACK_FILE_PATH);
-					} break;
-
-					case PlaybackState::replaying:
+						playback_state = PlaybackState::replaying;
+						DEBUG_printf(__FILE__ " :: Replaying reloaded playback `%S`.\n", PLAYBACK_FILE_PATH);
+					}
+					else
 					{
-						stop_playback();
-						DEBUG_printf(__FILE__ " :: Stopped `%S`.\n", PLAYBACK_FILE_PATH);
-					} break;
+						DEBUG_printf(__FILE__ " :: Stop current playback before loading `%S`.\n", PLAYBACK_FILE_PATH);
+					}
+				}
+				else
+				{
+					switch (playback_state)
+					{
+						case PlaybackState::null:
+						{
+							playback_state = PlaybackState::recording;
+
+							playback_file = CreateFileW(PLAYBACK_FILE_PATH, GENERIC_READ | GENERIC_WRITE, 0, 0, CREATE_ALWAYS, 0, 0);
+							if (playback_file == INVALID_HANDLE_VALUE)
+							{
+								DEBUG_printf(__FILE__ " :: Failed to create `%S` for playback.\n", PLAYBACK_FILE_PATH);
+								stop_playback();
+								goto ABORT_PLAYBACK;
+							}
+
+							DWORD resulting_write_size;
+							if (!WriteFile(playback_file, platform_memory, PLATFORM_MEMORY_SIZE, &resulting_write_size, 0) || resulting_write_size != PLATFORM_MEMORY_SIZE)
+							{
+								DEBUG_printf(__FILE__ " :: Recorded `%lu` out of `%zu` bytes of memory to `%S`; aborting playback.\n", resulting_write_size, PLATFORM_MEMORY_SIZE, PLAYBACK_FILE_PATH);
+								stop_playback();
+								goto ABORT_PLAYBACK;
+							}
+
+							DEBUG_printf(__FILE__ " :: Recording `%S`.\n", PLAYBACK_FILE_PATH);
+						} break;
+
+						case PlaybackState::recording:
+						{
+							playback_state = PlaybackState::replaying;
+
+							playback_file_mapping = CreateFileMappingW(playback_file, 0, PAGE_READONLY, 0, 0, 0);
+							if (playback_file_mapping == INVALID_HANDLE_VALUE)
+							{
+								DEBUG_printf(__FILE__ " :: Failed to file map `%S`; aborting playback.\n", PLAYBACK_FILE_PATH);
+								stop_playback();
+								goto ABORT_PLAYBACK;
+							}
+
+							playback_data = reinterpret_cast<byte*>(MapViewOfFile(playback_file_mapping, FILE_MAP_READ, 0, 0, 0));
+							if (!playback_data)
+							{
+								DEBUG_printf(__FILE__ " :: Failed to get a map view of `%S`; aborting playback.\n", PLAYBACK_FILE_PATH);
+								stop_playback();
+								goto ABORT_PLAYBACK;
+							}
+
+							LARGE_INTEGER playback_file_size;
+							if (GetFileSizeEx(playback_file, &playback_file_size))
+							{
+								playback_size = static_cast<u64>(playback_file_size.QuadPart);
+							}
+							else
+							{
+								DEBUG_printf(__FILE__ " :: Failed to get size of `%S`; aborting playback.\n", PLAYBACK_FILE_PATH);
+								stop_playback();
+								goto ABORT_PLAYBACK;
+							}
+
+							ASSERT(playback_size > PLATFORM_MEMORY_SIZE);
+							ASSERT((playback_size - PLATFORM_MEMORY_SIZE) % sizeof(PlatformInput) == 0);
+
+							playback_input_index = 0;
+
+							DEBUG_printf(__FILE__ " :: Replaying `%S`.\n", PLAYBACK_FILE_PATH);
+						} break;
+
+						case PlaybackState::replaying:
+						{
+							stop_playback();
+							DEBUG_printf(__FILE__ " :: Stopped `%S`.\n", PLAYBACK_FILE_PATH);
+						} break;
+					}
 				}
 			}
+			ABORT_PLAYBACK:;
 
 			if (playback_state == PlaybackState::recording)
 			{
