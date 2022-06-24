@@ -296,7 +296,7 @@ PlatformUpdate_t(PlatformUpdate)
 			}
 		}
 	}
-	DEBUG_printf("%f %f\n", PASS_V2(state->hero_position));
+	//DEBUG_printf("%f %f\n", PASS_V2(state->hero_position));
 
 	//
 	// Render.
