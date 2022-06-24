@@ -1,8 +1,6 @@
 #include "unified.h"
 #include "platform.h"
 
-// @TODO@ Accurate kinematics.
-
 constexpr f32 PIXELS_PER_METER = 50.0f;
 
 struct Wall
@@ -46,6 +44,164 @@ internal void set_pixel_rect(PlatformFramebuffer* platform_framebuffer, vi2 top_
 internal void draw_rect(PlatformFramebuffer* platform_framebuffer, vf2 bottom_left, vf2 dimensions, vf3 rgb)
 {
 	set_pixel_rect(platform_framebuffer, vxx(bottom_left.x, platform_framebuffer->dimensions.y - bottom_left.y - dimensions.y), vxx(dimensions), vxx_argb(rgb));
+}
+
+global constexpr f32 COLLISION_EPSILON = 0.000001f;
+
+enum struct CollisionType : u8
+{
+	none,
+	collided,
+	embedded
+};
+
+// @TODO@ If type is `none`, don't bother with displacement?
+struct CollisionResult
+{
+	CollisionType type;
+	vf2           displacement;
+	vf2           normal;
+};
+
+internal CollisionResult prioritize_collision_results(CollisionResult a, CollisionResult b)
+{
+	if (a.type == CollisionType::none)
+	{
+		return b;
+	}
+	else if (b.type == CollisionType::none || norm(a.displacement) * (a.type == CollisionType::embedded ? 1.0f : -1.0f) >= norm(b.displacement) * (b.type == CollisionType::embedded ? 1.0f : -1.0f))
+	{
+		return a;
+	}
+	else
+	{
+		return b;
+	}
+}
+
+internal CollisionResult collide_against_plane(vf2 position, vf2 displacement, vf2 plane_center, vf2 plane_normal)
+{
+	f32 inside_amount       = dot(plane_normal, plane_center - position);
+	f32 intersection_scalar = inside_amount / dot(plane_normal, displacement);
+	if (inside_amount < 0.0f && IN_RANGE(intersection_scalar, 0.0f, 1.0f))
+	{
+		return
+			{
+				.type         = CollisionType::collided,
+				.displacement = displacement * intersection_scalar,
+				.normal       = plane_normal
+			};
+	}
+	else if (inside_amount < 0.0f || (inside_amount <= COLLISION_EPSILON && dot(displacement, plane_normal) >= -COLLISION_EPSILON))
+	{
+		return
+			{
+				.type         = CollisionType::none,
+				.displacement = displacement
+			};
+	}
+	else
+	{
+		return
+			{
+				.type         = CollisionType::embedded,
+				.displacement = plane_normal * inside_amount,
+				.normal       = plane_normal
+			};
+	}
+}
+
+internal CollisionResult collide_against_line(vf2 position, vf2 displacement, vf2 line_center, vf2 line_normal, f32 padding)
+{
+	vf2 plane_normal = line_normal * (dot(position - line_center, line_normal) < 0.0f ? -1.0f : 1.0f);
+	return collide_against_plane(position, displacement, line_center + plane_normal * padding, plane_normal);
+}
+
+internal CollisionResult collide_against_circle(vf2 position, vf2 displacement, vf2 center, f32 radius)
+{
+	vf2 rel_position            = position - center;
+	f32 distance_from_center    = norm(rel_position);
+	f32 amount_away_from_center = dot(rel_position, displacement);
+
+	if (distance_from_center < COLLISION_EPSILON)
+	{
+		return {};
+	}
+
+	if (distance_from_center > radius)
+	{
+		f32 norm_sq_displacement = norm_sq(displacement);
+		if (norm_sq_displacement >= COLLISION_EPSILON)
+		{
+			f32 discriminant = amount_away_from_center * amount_away_from_center - norm_sq_displacement * (distance_from_center * distance_from_center - radius * radius);
+			if (discriminant >= 0.0f)
+			{
+				f32 intersection_scalar = -(amount_away_from_center + sqrtf(discriminant)) / norm_sq_displacement;
+				if (IN_RANGE(intersection_scalar, 0.0f, 1.0f))
+				{
+					return
+						{
+							.type         = CollisionType::collided,
+							.displacement = displacement * intersection_scalar,
+							.normal       = rel_position / distance_from_center
+						};
+				}
+			}
+		}
+	}
+
+	if (distance_from_center > radius || radius - distance_from_center < COLLISION_EPSILON && amount_away_from_center >= 0.0f)
+	{
+		return
+			{
+				.type         = CollisionType::none,
+				.displacement = displacement
+			};
+	}
+	else
+	{
+		return
+			{
+				.type         = CollisionType::embedded,
+				.displacement = normalize(rel_position) * radius - rel_position,
+				.normal       = rel_position / distance_from_center
+			};
+	}
+}
+
+internal CollisionResult collide_against_rounded_rectangle(vf2 position, vf2 displacement, vf2 rect_bottom_left, vf2 rect_dimensions, f32 padding)
+{
+	CollisionResult left_right = {};
+	if (IN_RANGE(position.y, rect_bottom_left.y + COLLISION_EPSILON, rect_bottom_left.y + rect_dimensions.y - COLLISION_EPSILON))
+	{
+		left_right = collide_against_line(position, displacement, rect_bottom_left + vf2 { rect_dimensions.x / 2.0f, 0.0f }, { 1.0f, 0.0f }, rect_dimensions.x / 2.0f + padding);
+		if (left_right.type != CollisionType::none && !IN_RANGE(position.y + left_right.displacement.y - rect_bottom_left.y, 0.0f, rect_dimensions.y))
+		{
+			left_right.type         = CollisionType::none;
+			left_right.displacement = displacement;
+		}
+	}
+	CollisionResult bottom_top = {};
+	if (IN_RANGE(position.x, rect_bottom_left.x + COLLISION_EPSILON, rect_bottom_left.x + rect_dimensions.x - COLLISION_EPSILON))
+	{
+		bottom_top = collide_against_line(position, displacement, rect_bottom_left + vf2 { 0.0f, rect_dimensions.y / 2.0f }, { 0.0f, 1.0f }, rect_dimensions.y / 2.0f + padding);
+		if (bottom_top.type != CollisionType::none && !IN_RANGE(position.x + bottom_top.displacement.x - rect_bottom_left.x, 0.0f, rect_dimensions.x))
+		{
+			bottom_top.type         = CollisionType::none;
+			bottom_top.displacement = displacement;
+		}
+	}
+
+	return
+		prioritize_collision_results
+		(
+			prioritize_collision_results(bottom_top, left_right),
+			prioritize_collision_results
+			(
+				prioritize_collision_results(collide_against_circle(position, displacement, rect_bottom_left                                  , padding), collide_against_circle(position, displacement, rect_bottom_left + vf2 { rect_dimensions.x, 0.0f }, padding)),
+				prioritize_collision_results(collide_against_circle(position, displacement, rect_bottom_left + vf2 { 0.0f, rect_dimensions.y }, padding), collide_against_circle(position, displacement, rect_bottom_left +       rect_dimensions          , padding))
+			)
+		);
 }
 
 PlatformUpdate_t(PlatformUpdate)
@@ -94,7 +250,7 @@ PlatformUpdate_t(PlatformUpdate)
 			}
 		}
 
-		state->hero_position = { 5.0f, 5.0f };
+		state->hero_position = { 5.0f, 7.0f };
 
 		state->is_initialized = true;
 	}
@@ -104,6 +260,7 @@ PlatformUpdate_t(PlatformUpdate)
 	//
 
 	vf2 target_hero_velocity = { 0.0f, 0.0f };
+	#if 1
 	if (LTR_DOWN('a'))
 	{
 		target_hero_velocity.x -= 1.0f;
@@ -120,6 +277,7 @@ PlatformUpdate_t(PlatformUpdate)
 	{
 		target_hero_velocity.y += 1.0f;
 	}
+	#endif
 	if (+target_hero_velocity)
 	{
 		target_hero_velocity = normalize(target_hero_velocity) * 1.78816f;
@@ -130,8 +288,40 @@ PlatformUpdate_t(PlatformUpdate)
 		}
 	}
 
-	state->hero_velocity  = dampen(state->hero_velocity, target_hero_velocity, 0.001f, platform_delta_time);
-	state->hero_position += state->hero_velocity * platform_delta_time;
+	state->hero_velocity = dampen(state->hero_velocity, target_hero_velocity, 0.001f, platform_delta_time);
+
+	constexpr f32 HERO_COLLISION_PADDING = 0.15f;
+	{
+		vf2 displacement = state->hero_velocity * platform_delta_time;
+
+		//if (fabsf(state->hero_position.y - 5.021081f) < 0.00001f)
+		//{
+		//	DEBUG_printf("PAUSE\n");
+		//}
+
+		FOR_RANGE(8)
+		{
+			CollisionResult result = {};
+
+			FOR_ELEMS(it, state->chunk.wall_buffer, state->chunk.wall_count)
+			{
+				result = prioritize_collision_results(result, collide_against_rounded_rectangle(state->hero_position, displacement, it->rel_position, it->dimensions, HERO_COLLISION_PADDING));
+			}
+
+			if (result.type == CollisionType::none)
+			{
+				state->hero_position += displacement;
+				break;
+			}
+			else
+			{
+				state->hero_position += result.displacement;
+				state->hero_velocity  = dot(state->hero_velocity - result.displacement, rotate90(result.normal)) * rotate90(result.normal);
+				displacement          = dot(displacement         - result.displacement, rotate90(result.normal)) * rotate90(result.normal);
+			}
+		}
+	}
+	DEBUG_printf("%f %f\n", PASS_V2(state->hero_position));
 
 	//
 	// Render.
@@ -150,13 +340,22 @@ PlatformUpdate_t(PlatformUpdate)
 		);
 	}
 
-	constexpr vf2 HERO_EFFECTIVE_DIMENSIONS = { 0.7f, 1.7399f };
+	constexpr vf2 HERO_RENDER_DIMENSIONS = { 0.7f, 1.7399f };
 	draw_rect
 	(
 		platform_framebuffer,
 		state->hero_position * PIXELS_PER_METER,
-		HERO_EFFECTIVE_DIMENSIONS * PIXELS_PER_METER,
+		HERO_RENDER_DIMENSIONS * PIXELS_PER_METER,
 		{ 0.85f, 0.87f, 0.3f }
+	);
+
+	constexpr vf2 HERO_HITBOX_DIMENSIONS = { 0.7f, 0.4f };
+	draw_rect
+	(
+		platform_framebuffer,
+		state->hero_position * PIXELS_PER_METER,
+		HERO_HITBOX_DIMENSIONS * PIXELS_PER_METER,
+		{ 0.9f, 0.5f, 0.1f }
 	);
 
 	#if 0
@@ -189,9 +388,9 @@ PlatformUpdate_t(PlatformUpdate)
 
 PlatformSound_t(PlatformSound)
 {
+	#if 0
 	State* state = reinterpret_cast<State*>(platform_memory);
 
-	#if 0
 	FOR_ELEMS(sample, platform_sample_buffer, platform_sample_count)
 	{
 		*sample   = { static_cast<i16>(sinf(state->t) * 1250.0f), static_cast<i16>(sinf(state->t) * 1250.0f) };

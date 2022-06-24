@@ -24,7 +24,6 @@ global vi2           g_client_dimensions             = { 0, 0 };
 global PlatformInput g_platform_input                = {};
 global i32           g_unfreed_file_data_counter     = 0;
 global i64           g_performance_counter_frequency =
-
 	[](void)
 	{
 		LARGE_INTEGER n;
@@ -33,9 +32,6 @@ global i64           g_performance_counter_frequency =
 	}();
 
 #if DEBUG
-#define HANDMADE_RALPH_DLL_FILE_PATH      EXE_DIR L"HandmadeRalph.dll"
-#define HANDMADE_RALPH_DLL_FILE_PATH_TEMP HANDMADE_RALPH_DLL_FILE_PATH ".temp"
-
 struct HandmadeRalphDLL
 {
 	HMODULE           handle;
@@ -46,14 +42,8 @@ struct HandmadeRalphDLL
 
 internal HandmadeRalphDLL DEBUG_load_handmade_ralph_dll(void)
 {
-	if (!CopyFileW(HANDMADE_RALPH_DLL_FILE_PATH, HANDMADE_RALPH_DLL_FILE_PATH_TEMP, false))
-	{
-		ASSERT(false);
-		return {};
-	}
-
 	WIN32_FILE_ATTRIBUTE_DATA dll_attribute_data;
-	if (!GetFileAttributesExW(HANDMADE_RALPH_DLL_FILE_PATH, GetFileExInfoStandard, &dll_attribute_data))
+	if (!GetFileAttributesExW(EXE_DIR L"HandmadeRalph.dll", GetFileExInfoStandard, &dll_attribute_data))
 	{
 		ASSERT(false);
 		return {};
@@ -61,7 +51,7 @@ internal HandmadeRalphDLL DEBUG_load_handmade_ralph_dll(void)
 
 	HandmadeRalphDLL dll =
 		{
-			.handle         = LoadLibraryW(HANDMADE_RALPH_DLL_FILE_PATH_TEMP),
+			.handle         = LoadLibraryW(EXE_DIR L"HandmadeRalph.dll.temp"),
 			.write_time     = dll_attribute_data.ftLastWriteTime,
 			.PlatformUpdate = reinterpret_cast<PlatformUpdate_t*>(GetProcAddress(dll.handle, "PlatformUpdate")),
 			.PlatformSound  = reinterpret_cast<PlatformSound_t *>(GetProcAddress(dll.handle, "PlatformSound"))
@@ -491,7 +481,16 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int cmd_show)
 	ASSERT(backbuffer_bitmap_data);
 	ASSERT(platform_memory);
 
+	if (!CopyFileW(EXE_DIR L"HandmadeRalph.dll", EXE_DIR L"HandmadeRalph.dll.temp", false))
+	{
+		ASSERT(false);
+	}
 	HandmadeRalphDLL handmade_ralph_dll = DEBUG_load_handmade_ralph_dll();
+	DEFER
+	{
+		FreeLibrary(handmade_ralph_dll.handle);
+		DeleteFileW(EXE_DIR L"HandmadeRalph.dll.temp");
+	};
 
 	bool32 is_computed_sample_on_time = false;
 	i32    last_computed_sample_index = 0;
@@ -561,12 +560,13 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int cmd_show)
 			WIN32_FILE_ATTRIBUTE_DATA dll_attribute_data;
 			if
 			(
-				GetFileAttributesExW(HANDMADE_RALPH_DLL_FILE_PATH, GetFileExInfoStandard, &dll_attribute_data)
-				&& !(dll_attribute_data.ftLastWriteTime.dwHighDateTime == handmade_ralph_dll.write_time.dwHighDateTime && dll_attribute_data.ftLastWriteTime.dwLowDateTime == handmade_ralph_dll.write_time.dwLowDateTime)
-				&& GetFileAttributesW(L"" LOCK_FILE_PATH) == INVALID_FILE_ATTRIBUTES
+				GetFileAttributesExW(EXE_DIR L"HandmadeRalph.dll", GetFileExInfoStandard, &dll_attribute_data)
+				&& CompareFileTime(&dll_attribute_data.ftLastWriteTime, &handmade_ralph_dll.write_time)
+				&& GetFileAttributesW(L"W:/build/LOCK.temp") == INVALID_FILE_ATTRIBUTES
 			)
 			{
 				FreeLibrary(handmade_ralph_dll.handle);
+				while (!CopyFileW(EXE_DIR L"HandmadeRalph.dll", EXE_DIR L"HandmadeRalph.dll.temp", false));
 				handmade_ralph_dll = DEBUG_load_handmade_ralph_dll();
 			}
 		}
@@ -705,7 +705,12 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int cmd_show)
 
 				platform_input        = &reinterpret_cast<PlatformInput*>(playback_data + PLATFORM_MEMORY_SIZE)[playback_input_index];
 				playback_input_index += 1;
-				playback_input_index %= (playback_size - PLATFORM_MEMORY_SIZE) / sizeof(PlatformInput);
+
+				if (playback_input_index >= static_cast<i32>((playback_size - PLATFORM_MEMORY_SIZE) / sizeof(PlatformInput)))
+				{
+					DEBUG_printf(__FILE__ " :: Repeating `%S`.\n", PLAYBACK_FILE_PATH);
+					playback_input_index = 0;
+				}
 			}
 		}
 		#endif

@@ -153,7 +153,6 @@ typedef double      f64;
 	#define DEBUG_STDOUT_HALT()
 #endif
 
-
 #define enum_loose(NAME, TYPE)\
 enum struct NAME : TYPE;\
 internal constexpr TYPE operator+  (const NAME& a               ) { return static_cast<TYPE>(a); }\
