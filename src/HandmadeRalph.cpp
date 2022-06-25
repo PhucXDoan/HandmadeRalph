@@ -4,6 +4,8 @@
 
 #define DEBUG_AUDIO 0
 
+// @TODO@ Memory arena that return 0 if there isn't enough space left?
+
 constexpr f32 PIXELS_PER_METER = 50.0f;
 constexpr f32 METERS_PER_CHUNK = 16.0f;
 
@@ -20,10 +22,41 @@ struct Chunk
 	Wall  wall_buffer[128];
 };
 
+struct BMP
+{
+	vi2  dims;
+	u32* rgba;
+};
+
+enum struct Cardinal : u8
+{
+	left,
+	right,
+	down,
+	up
+};
+
 struct State
 {
-	bool32 is_initialized;
-	u32    seed;
+	bool32      is_initialized;
+	u32         seed;
+	MemoryArena asset_arena;
+
+	union
+	{
+		struct
+		{
+			struct
+			{
+				BMP head;
+				BMP cape;
+				BMP torso;
+			}   hero[4];
+			BMP hero_shadow;
+			BMP background;
+		}   bmp;
+		BMP bmps[sizeof(bmp) / sizeof(BMP)];
+	};
 
 	union
 	{
@@ -46,6 +79,16 @@ struct State
 };
 static_assert(sizeof(State) < PLATFORM_MEMORY_SIZE / 4);
 
+template <typename TYPE>
+internal TYPE eat(PlatformFileData* file_data)
+{
+	ASSERT(file_data->read_index + sizeof(TYPE) <= file_data->size);
+	TYPE value;
+	memcpy(&value, file_data->data + file_data->read_index, sizeof(TYPE));
+	file_data->read_index += sizeof(TYPE);
+	return value;
+}
+
 internal void set_pixel_rect(PlatformFramebuffer* platform_framebuffer, vi2 top_left, vi2 dims, u32 pixel)
 {
 	FOR_RANGE(y, max(top_left.y, 0), min(top_left.y + dims.y, platform_framebuffer->dims.y))
@@ -59,7 +102,7 @@ internal void set_pixel_rect(PlatformFramebuffer* platform_framebuffer, vi2 top_
 
 internal void draw_rect(PlatformFramebuffer* platform_framebuffer, vf2 bottom_left, vf2 dims, vf3 rgb)
 {
-	set_pixel_rect(platform_framebuffer, vxx(bottom_left.x, platform_framebuffer->dims.y - bottom_left.y - dims.y), vxx(dims), vxx_argb(rgb));
+	set_pixel_rect(platform_framebuffer, vxx(bottom_left.x, platform_framebuffer->dims.y - bottom_left.y - dims.y), vxx(dims), make_argb(vxx(rgb, 1.0f)));
 }
 
 global constexpr f32 COLLISION_EPSILON = 0.000001f;
@@ -206,6 +249,108 @@ PlatformUpdate_t(PlatformUpdate)
 	{
 		state->is_initialized = true;
 
+		state->asset_arena =
+			{
+				.size = PLATFORM_MEMORY_SIZE - sizeof(State),
+				.base = platform_memory      + sizeof(State)
+			};
+
+		constexpr wstrlit bmp_file_paths[] =
+			{
+				DATA_DIR L"test_hero_left_head.bmp",
+				DATA_DIR L"test_hero_left_cape.bmp",
+				DATA_DIR L"test_hero_left_torso.bmp",
+				DATA_DIR L"test_hero_right_head.bmp",
+				DATA_DIR L"test_hero_right_cape.bmp",
+				DATA_DIR L"test_hero_right_torso.bmp",
+				DATA_DIR L"test_hero_front_head.bmp",
+				DATA_DIR L"test_hero_front_cape.bmp",
+				DATA_DIR L"test_hero_front_torso.bmp",
+				DATA_DIR L"test_hero_back_head.bmp",
+				DATA_DIR L"test_hero_back_cape.bmp",
+				DATA_DIR L"test_hero_back_torso.bmp",
+				DATA_DIR L"test_hero_shadow.bmp",
+				DATA_DIR L"test_background.bmp"
+			};
+
+		FOR_ELEMS(bmp, state->bmps)
+		{
+			PlatformFileData file_data;
+			if (!PlatformReadFileData(&file_data, bmp_file_paths[bmp_index]))
+			{
+				ASSERT(false);
+				return PlatformUpdateExitCode::abort;
+			}
+			DEFER { PlatformFreeFileData(&file_data); };
+
+			// @TODO@ Consider endianess.
+			#pragma pack(push, 1)
+			struct BitmapHeader
+			{
+				char name[2];
+				u32  file_size;
+				u16  reserved[2];
+				u32  pixel_data_offset;
+				u32  dib_header_size;
+				vi2  dims;
+				u16  color_planes;
+				u16  bits_per_pixel;
+				u32  compression_method;
+				u32  pixel_data_size;
+				vi2  pixels_per_meter;
+				u32  color_count;
+				u32  important_colors;
+				u32  mask_r;
+				u32  mask_g;
+				u32  mask_b;
+				u32  mask_a;
+			};
+			#pragma pack(pop)
+
+			BitmapHeader header = eat<BitmapHeader>(&file_data);
+
+			if
+			(
+				(header.name[0] != 'B' || header.name[1] != 'M')                   ||
+				(header.file_size != file_data.size)                               ||
+				(header.dib_header_size != 124)                                    || // @TODO@ For now only BITMAPV5HEADER.
+				(header.dims.x <= 0 || header.dims.y <= 0)                         ||
+				(header.color_planes != 1)                                         ||
+				(header.bits_per_pixel != 32)                                      || // @TODO@ For now must be RGBA.
+				(header.compression_method != 3)                                   || // @TODO@ Different compression methods and their meaning?
+				(header.pixel_data_size != 4ULL * header.dims.x * header.dims.y)   ||
+				(header.color_count != 0)                                          ||
+				(header.important_colors != 0)                                     ||
+				(~(header.mask_r | header.mask_g | header.mask_b | header.mask_a)) ||
+				(  header.mask_r & header.mask_g & header.mask_b & header.mask_a )
+			)
+			{
+				ASSERT(false);
+				return PlatformUpdateExitCode::abort;
+			}
+
+			bmp->dims = header.dims;
+			bmp->rgba = memory_arena_allocate<u32>(&state->asset_arena, static_cast<u64>(bmp->dims.x) * bmp->dims.y);
+
+			// @TODO@ Microsoft specific intrinsic...
+			u32 lz_r = __lzcnt(header.mask_r);
+			u32 lz_g = __lzcnt(header.mask_g);
+			u32 lz_b = __lzcnt(header.mask_b);
+			u32 lz_a = __lzcnt(header.mask_a);
+			FOR_RANGE(y, header.dims.y)
+			{
+				FOR_RANGE(x, header.dims.x)
+				{
+					aliasing bmp_pixel = reinterpret_cast<u32*>(file_data.data + header.pixel_data_offset)[y * header.dims.x + x];
+					bmp->rgba[y * bmp->dims.x + x] =
+						(((bmp_pixel & header.mask_r) << lz_r) >>  0) |
+						(((bmp_pixel & header.mask_g) << lz_g) >>  8) |
+						(((bmp_pixel & header.mask_b) << lz_b) >> 16) |
+						(((bmp_pixel & header.mask_a) << lz_a) >> 24);
+				}
+			}
+		}
+
 		FOR_RANGE(chunk_y, ARRAY_CAPACITY(state->chunks))
 		{
 			FOR_RANGE(chunk_x, ARRAY_CAPACITY(state->chunks[0]))
@@ -233,7 +378,6 @@ PlatformUpdate_t(PlatformUpdate)
 			}
 		}
 
-
 		state->hero_chunk   = &state->chunks[0][0];
 		state->hero_rel_pos = { 5.0f, 7.0f };
 	}
@@ -257,7 +401,8 @@ PlatformUpdate_t(PlatformUpdate)
 
 	constexpr vf2 HERO_HITBOX_DIMS = { 0.7f, 0.4f };
 	constexpr f32 WALL_PADDING     = 0.1f;
-	{
+
+	{ // @TODO@ Better performing collision.
 		vf2 displacement = state->hero_vel * platform_delta_time;
 
 		FOR_RANGE(8)
@@ -333,7 +478,10 @@ PlatformUpdate_t(PlatformUpdate)
 	// Render.
 	//
 
-	memset(platform_framebuffer->pixels, 0, platform_framebuffer->dims.x * platform_framebuffer->dims.y * sizeof(u32));
+	FOR_ELEMS(it, platform_framebuffer->pixels, platform_framebuffer->dims.x * platform_framebuffer->dims.y)
+	{
+		*it = make_argb(0, 0, 0, 255);
+	}
 
 	FOR_ELEMS(chunk, state->chunks_flat)
 	{
@@ -366,11 +514,25 @@ PlatformUpdate_t(PlatformUpdate)
 		{ 0.9f, 0.5f, 0.1f }
 	);
 
+	aliasing bmp = state->bmp.hero[0].head;
+	FOR_RANGE(y, bmp.dims.y)
+	{
+		FOR_RANGE(x, bmp.dims.x)
+		{
+			aliasing dst = platform_framebuffer->pixels[(platform_framebuffer->dims.y - 1 - y) * platform_framebuffer->dims.x + x];
+			vf4 bot = vf4_from_argb(dst);
+			vf4 top = vf4_from_rgba(bmp.rgba[y * bmp.dims.x + x]);
+			f32 new_alpha = top.w + bot.w * (1.0f - top.w);
+			dst = make_argb(vxx(lerp(bot.xyz * bot.w, top.xyz, top.w) / new_alpha, new_alpha));
+		}
+	}
+
 	#if DEBUG_AUDIO
-	//DEBUG_printf("%d %d\n", PASS_V2(platform_input->mouse));
 	state->hertz = 512.0f + platform_input->gamepads[0].stick_right.y * 100.0f;
 	state->t     = fmodf(state->t, TAU);
 	#endif
+
+	return PlatformUpdateExitCode::normal;
 }
 
 PlatformSound_t(PlatformSound)

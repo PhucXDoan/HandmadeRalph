@@ -85,8 +85,9 @@ PlatformReadFileData_t(PlatformReadFileData)
 		return false;
 	}
 
-	platform_file_data->size = static_cast<u64>(file_size.QuadPart),
-	platform_file_data->data = reinterpret_cast<byte*>(VirtualAlloc(0, platform_file_data->size, MEM_COMMIT, PAGE_READWRITE));
+	platform_file_data->read_index = 0;
+	platform_file_data->size       = static_cast<u64>(file_size.QuadPart);
+	platform_file_data->data       = reinterpret_cast<byte*>(VirtualAlloc(0, platform_file_data->size, MEM_COMMIT, PAGE_READWRITE));
 
 	// @TODO@ Larger file sizes.
 	if (platform_file_data->size > 0xFFFFFFFF)
@@ -634,7 +635,7 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int cmd_show)
 				DEBUG_persist u64           playback_size         = 0;
 				DEBUG_persist i32           playback_input_index  = 0;
 
-				constexpr const wchar_t* PLAYBACK_FILE_PATH = EXE_DIR L"HandmadeRalph.playback";
+				constexpr wstrlit PLAYBACK_FILE_PATH = EXE_DIR L"HandmadeRalph.playback";
 				lambda stop_playback =
 					[&]()
 					{
@@ -828,16 +829,23 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int cmd_show)
 						.pixels = reinterpret_cast<u32*>(backbuffer_bitmap_data)
 					};
 
-				hotloader.PlatformUpdate
+				if
 				(
-					&platform_framebuffer,
-					platform_input,
-					platform_memory,
-					SECONDS_PER_UPDATE,
-					PlatformReadFileData,
-					PlatformFreeFileData,
-					PlatformWriteFile
-				);
+					hotloader.PlatformUpdate
+					(
+						&platform_framebuffer,
+						platform_input,
+						platform_memory,
+						SECONDS_PER_UPDATE,
+						PlatformReadFileData,
+						PlatformFreeFileData,
+						PlatformWriteFile
+					) == PlatformUpdateExitCode::abort
+				)
+				{
+					DEBUG_printf(__FILE__ " :: Game exit code `abort`.");
+					return 1;
+				}
 			}
 
 			//
