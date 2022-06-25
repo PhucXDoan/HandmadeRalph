@@ -18,7 +18,7 @@ typedef  XInputGetState_t(XInputGetState_t);
 internal XInputGetState_t(stub_XInputGetState) { return ERROR_DEVICE_NOT_CONNECTED; }
 global   XInputGetState_t* g_XInputGetState = stub_XInputGetState;
 
-global vi2           g_client_dimensions             = { 0, 0 };
+global vi2           g_client_dims                   = { 0, 0 };
 global PlatformInput g_platform_input                = {};
 global i32           g_unfreed_file_data_counter     = 0;
 global i64           g_performance_counter_frequency =
@@ -185,7 +185,7 @@ internal LRESULT window_procedure_callback(HWND window, UINT message, WPARAM wpa
 		{
 			RECT client_rect;
 			GetClientRect(window, &client_rect);
-			g_client_dimensions = { client_rect.right - client_rect.left, client_rect.bottom - client_rect.top };
+			g_client_dims = { client_rect.right - client_rect.left, client_rect.bottom - client_rect.top };
 		} break;
 
 		case WM_SYSKEYDOWN:
@@ -293,7 +293,22 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int cmd_show)
 			DEBUG_printf(__FILE__ " :: Failed to calculate window dimnesions.");
 			return 1;
 		}
-		window = CreateWindowExW(0, CLASS_NAME, L"Handmade Ralph", WINDOW_STYLE, CW_USEDEFAULT, CW_USEDEFAULT, rect.right - rect.left, rect.bottom - rect.top, 0, 0, instance, 0);
+		window =
+			CreateWindowExW
+			(
+				0,
+				CLASS_NAME,
+				L"Handmade Ralph",
+				WINDOW_STYLE,
+				DEBUG ? 256 : CW_USEDEFAULT,
+				DEBUG ? 256 : CW_USEDEFAULT,
+				rect.right  - rect.left,
+				rect.bottom - rect.top,
+				0,
+				0,
+				instance,
+				0
+			);
 	}
 	if (!window)
 	{
@@ -809,8 +824,8 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int cmd_show)
 				// @TODO@ Platform-agnostic pixel-layout framebuffer.
 				PlatformFramebuffer platform_framebuffer =
 					{
-						.dimensions = { BACKBUFFER_BITMAP_INFO.bmiHeader.biWidth, -BACKBUFFER_BITMAP_INFO.bmiHeader.biHeight },
-						.pixels     = reinterpret_cast<u32*>(backbuffer_bitmap_data)
+						.dims   = { BACKBUFFER_BITMAP_INFO.bmiHeader.biWidth, -BACKBUFFER_BITMAP_INFO.bmiHeader.biHeight },
+						.pixels = reinterpret_cast<u32*>(backbuffer_bitmap_data)
 					};
 
 				hotloader.PlatformUpdate

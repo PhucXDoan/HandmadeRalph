@@ -8,13 +8,22 @@
 #define LTR_DOWN(BTN)           BUTTON_DOWN(platform_input->button.letters[(BTN) - 'a'])
 #define LTR_PRESSES(BTN)        BUTTON_PRESSES(platform_input->button.letters[(BTN) - 'a'])
 #define LTR_RELEASES(BTN)       BUTTON_RELEASES(platform_input->button.letters[(BTN) - 'a'])
+#define ARRW_DOWN()             (vi2 { -    BTN_DOWN(.arrow_left) +     BTN_DOWN(.arrow_right), -    BTN_DOWN(.arrow_down) +     BTN_DOWN(.arrow_up) })
+#define ARRW_PRESSES()          (vi2 { - BTN_PRESSES(.arrow_left) +  BTN_PRESSES(.arrow_right), - BTN_PRESSES(.arrow_down) +  BTN_PRESSES(.arrow_up) })
+#define ARRW_RELEASES()         (vi2 { -BTN_RELEASES(.arrow_left) + BTN_RELEASES(.arrow_right), -BTN_RELEASES(.arrow_down) + BTN_RELEASES(.arrow_up) })
+#define WASD_DOWN()             (vi2 { -    LTR_DOWN('a') +     LTR_DOWN('d'), -    LTR_DOWN('s') +     LTR_DOWN('w') })
+#define WASD_PRESSES()          (vi2 { - LTR_PRESSES('a') +  LTR_PRESSES('d'), - LTR_PRESSES('s') +  LTR_PRESSES('w') })
+#define WASD_RELEASES()         (vi2 { -LTR_RELEASES('a') + LTR_RELEASES('d'), -LTR_RELEASES('s') + LTR_RELEASES('w') })
+#define HJKL_DOWN()             (vi2 { -    LTR_DOWN('h') +     LTR_DOWN('l'), -    LTR_DOWN('j') +     LTR_DOWN('k') })
+#define HJKL_PRESSES()          (vi2 { - LTR_PRESSES('h') +  LTR_PRESSES('l'), - LTR_PRESSES('j') +  LTR_PRESSES('k') })
+#define HJKL_RELEASES()         (vi2 { -LTR_RELEASES('h') + LTR_RELEASES('l'), -LTR_RELEASES('j') + LTR_RELEASES('k') })
 
 global constexpr i32 PLATFORM_GAMEPAD_MAX = 4;
 global constexpr u64 PLATFORM_MEMORY_SIZE = GIBIBYTES_OF(1);
 
 struct PlatformFramebuffer
 {
-	vi2  dimensions;
+	vi2  dims;
 	u32* pixels;
 };
 
