@@ -17,9 +17,16 @@ struct Wall
 
 struct Chunk
 {
-	vi2   coords;
-	i32   wall_count;
-	Wall  wall_buffer[128];
+	bool32 exists;
+	vi2    coords;
+	i32    wall_count;
+	Wall   wall_buffer[128];
+};
+
+struct ChunkNode
+{
+	ChunkNode* next_node;
+	Chunk      chunk;
 };
 
 struct BMP
@@ -40,7 +47,7 @@ struct State
 {
 	bool32      is_initialized;
 	u32         seed;
-	MemoryArena asset_arena;
+	MemoryArena arena;
 
 	union
 	{
@@ -58,20 +65,17 @@ struct State
 		BMP bmps[sizeof(bmp) / sizeof(BMP)];
 	};
 
-	union
-	{
-		Chunk chunks[8][4];
-		Chunk chunks_flat[sizeof(chunks) / sizeof(Chunk)];
-	};
+	ChunkNode* available_chunk_node;
+	ChunkNode  chunk_node_hash_table[64];
 
-	Chunk*   hero_chunk;
-	vf2      hero_rel_pos;
-	vf2      hero_vel;
-	Cardinal hero_direction;
+	Chunk*     hero_chunk;
+	vf2        hero_rel_pos;
+	vf2        hero_vel;
+	Cardinal   hero_direction;
 
-	vi2    camera_coords;
-	vf2    camera_rel_pos;
-	vf2    camera_vel;
+	vi2        camera_coords;
+	vf2        camera_rel_pos;
+	vf2        camera_vel;
 
 	#if DEBUG_AUDIO
 	f32    hertz;
@@ -148,7 +152,7 @@ internal void draw_bmp(PlatformFramebuffer* platform_framebuffer, BMP* bmp, vi2 
 			{
 				dst = pack_as_raw_argb(top);
 			}
-			else
+			else if (top.a)
 			{
 				dst = pack_as_raw_argb(rgba_from(lerp(vf3_from(unpack_raw_argb(dst)), vf3_from(top), top.a / 255.0f)));
 			}
@@ -292,6 +296,51 @@ internal CollisionResult collide_against_rounded_rectangle(vf2 pos, vf2 displace
 		);
 }
 
+internal Chunk* get_chunk(State* state, vi2 coords)
+{
+	// @TODO@ Better hash function...
+	i32 hash = mod(coords.x * 13 + coords.y * 7 + coords.x * coords.y * 17, ARRAY_CAPACITY(state->chunk_node_hash_table));
+
+	ChunkNode* chunk_node = &state->chunk_node_hash_table[hash];
+
+	while (true)
+	{
+		if (chunk_node->chunk.exists)
+		{
+			if (chunk_node->chunk.coords == coords)
+			{
+				break;
+			}
+			else
+			{
+				if (!chunk_node->next_node)
+				{
+					DEBUG_printf("Chunk (%d %d) allocated on arena!\n", PASS_V2(coords));
+					chunk_node->next_node               = memory_arena_allocate_from_available(&state->available_chunk_node, &state->arena);
+					chunk_node->next_node->chunk.exists = false;
+				}
+
+				chunk_node = chunk_node->next_node;
+			}
+		}
+		else
+		{
+			DEBUG_printf("Chunk (%d %d) marked as existing!\n", PASS_V2(coords));
+			*chunk_node =
+				{
+					.chunk =
+						{
+							.exists = true,
+							.coords = coords
+						}
+				};
+			break;
+		}
+	}
+
+	return &chunk_node->chunk;
+}
+
 PlatformUpdate_t(PlatformUpdate)
 {
 	State* state = reinterpret_cast<State*>(platform_memory);
@@ -300,7 +349,7 @@ PlatformUpdate_t(PlatformUpdate)
 	{
 		state->is_initialized = true;
 
-		state->asset_arena =
+		state->arena =
 			{
 				.size = PLATFORM_MEMORY_SIZE - sizeof(State),
 				.base = platform_memory      + sizeof(State)
@@ -382,7 +431,7 @@ PlatformUpdate_t(PlatformUpdate)
 			}
 
 			bmp->dims = header.dims;
-			bmp->rgba = memory_arena_allocate<RGBA>(&state->asset_arena, static_cast<u64>(bmp->dims.x) * bmp->dims.y);
+			bmp->rgba = memory_arena_allocate<RGBA>(&state->arena, static_cast<u64>(bmp->dims.x) * bmp->dims.y);
 
 			// @TODO@ Microsoft specific intrinsic...
 			u32 lz_r = __lzcnt(header.mask_r);
@@ -405,34 +454,33 @@ PlatformUpdate_t(PlatformUpdate)
 			}
 		}
 
-		FOR_RANGE(chunk_y, ARRAY_CAPACITY(state->chunks))
+		vi2 coords = { 0, 0 };
+		FOR_RANGE(8)
 		{
-			FOR_RANGE(chunk_x, ARRAY_CAPACITY(state->chunks[0]))
+			Chunk* chunk = get_chunk(state, coords);
+
+			FOR_RANGE(16)
 			{
-				aliasing chunk = state->chunks[chunk_y][chunk_x];
-
-				chunk.coords = { chunk_x, chunk_y };
-
-				FOR_RANGE(wall_y, 16)
-				{
-					FOR_RANGE(wall_x, 16)
+				ASSERT(IN_RANGE(chunk->wall_count, 0, ARRAY_CAPACITY(chunk->wall_buffer)));
+				chunk->wall_buffer[chunk->wall_count] =
 					{
-						if (rng(&state->seed) < 0.15f)
-						{
-							ASSERT(IN_RANGE(chunk.wall_count, 0, ARRAY_CAPACITY(chunk.wall_buffer)));
-							chunk.wall_buffer[chunk.wall_count] =
-								{
-									.rel_pos = vxx(wall_x, wall_y),
-									.dims    = { 1.0f, 1.0f }
-								};
-							chunk.wall_count += 1;
-						}
-					}
-				}
+						.rel_pos = vxx(rng(&state->seed, 0, static_cast<i32>(METERS_PER_CHUNK)), rng(&state->seed, 0, static_cast<i32>(METERS_PER_CHUNK - 1))),
+						.dims    = { 1.0f, 1.0f }
+					};
+				chunk->wall_count += 1;
+			}
+
+			if (rng(&state->seed) < 0.5f)
+			{
+				coords.x += 1;
+			}
+			else
+			{
+				coords.y += 1;
 			}
 		}
 
-		state->hero_chunk   = &state->chunks[0][0];
+		state->hero_chunk   = get_chunk(state, { 0, 0 });
 		state->hero_rel_pos = { 5.0f, 7.0f };
 	}
 
@@ -468,8 +516,12 @@ PlatformUpdate_t(PlatformUpdate)
 		{
 			CollisionResult result = {};
 
-			FOR_ELEMS(chunk, state->chunks_flat)
+			// @TODO@ This checks chunks in a 3x3 adjacenct fashion. Could be better.
+
+			FOR_RANGE(i, 9)
 			{
+				Chunk* chunk = get_chunk(state, state->hero_chunk->coords + vi2 { i % 3, i / 3 });
+
 				FOR_ELEMS(wall, chunk->wall_buffer, chunk->wall_count)
 				{
 					result =
@@ -498,9 +550,8 @@ PlatformUpdate_t(PlatformUpdate)
 					else if (state->hero_rel_pos.x >= METERS_PER_CHUNK) { delta_coords.x += 1; }
 					if      (state->hero_rel_pos.y <              0.0f) { delta_coords.y -= 1; }
 					else if (state->hero_rel_pos.y >= METERS_PER_CHUNK) { delta_coords.y += 1; }
-					ASSERT(IN_RANGE(state->hero_chunk->coords.y + delta_coords.y, 0, ARRAY_CAPACITY(state->chunks   )));
-					ASSERT(IN_RANGE(state->hero_chunk->coords.x + delta_coords.x, 0, ARRAY_CAPACITY(state->chunks[0])));
-					state->hero_chunk    = &state->chunks[state->hero_chunk->coords.y + delta_coords.y][state->hero_chunk->coords.x + delta_coords.x];
+					ASSERT(state->hero_chunk->exists);
+					state->hero_chunk    = get_chunk(state, state->hero_chunk->coords + delta_coords);
 					state->hero_rel_pos -= delta_coords * METERS_PER_CHUNK;
 				};
 
@@ -541,17 +592,21 @@ PlatformUpdate_t(PlatformUpdate)
 
 	draw_bmp(platform_framebuffer, &state->bmp.background, { 0, 0 });
 
-	FOR_ELEMS(chunk, state->chunks_flat)
+	// @TODO@ This is going through the hash table to render. Bad!
+	FOR_ELEMS(chunk_node, state->chunk_node_hash_table)
 	{
-		FOR_ELEMS(wall, chunk->wall_buffer, chunk->wall_count)
+		if (chunk_node->chunk.exists)
 		{
-			draw_rect
-			(
-				platform_framebuffer,
-				vxx(((chunk->coords - state->camera_coords) * METERS_PER_CHUNK + wall->rel_pos - state->camera_rel_pos) * PIXELS_PER_METER),
-				vxx(wall->dims * PIXELS_PER_METER),
-				rgba_from(0.15f, 0.225f, 0.2f)
-			);
+			FOR_ELEMS(wall, chunk_node->chunk.wall_buffer, chunk_node->chunk.wall_count)
+			{
+				draw_rect
+				(
+					platform_framebuffer,
+					vxx(((chunk_node->chunk.coords - state->camera_coords) * METERS_PER_CHUNK + wall->rel_pos - state->camera_rel_pos) * PIXELS_PER_METER),
+					vxx(wall->dims * PIXELS_PER_METER),
+					rgba_from(0.15f, 0.225f, 0.2f)
+				);
+			}
 		}
 	}
 
