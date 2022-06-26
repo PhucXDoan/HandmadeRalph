@@ -143,6 +143,19 @@ typedef double         f64;
 		MACRO_CONCAT(NAME, _CC_TOTAL_) = 0;\
 		MACRO_CONCAT(NAME, _COUNTER_)  = 0;\
 	}
+
+	#define DEBUG_STDOUT_HALT()\
+	do\
+	{\
+		printf\
+		(\
+			"======================== DEBUG_STDOUT_HALT ========================\n"\
+			"A stdout halt occured from file `" __FILE__ "` on line " MACRO_STRINGIFY_(__LINE__) ".\n"\
+			"===================================================================\n"\
+		);\
+		fgetc(stdin);\
+	}\
+	while (false)
 #else
 	#define ASSERT(EXPRESSION)
 	#define DEBUG_printf(FSTR, ...)
@@ -317,7 +330,7 @@ struct vf2
 	union
 	{
 		struct { f32 x; f32 y; };
-		f32 coords[2];
+		f32 components[2];
 	};
 };
 
@@ -327,7 +340,7 @@ struct vf3
 	{
 		struct { f32 x; f32 y; f32 z; };
 		vf2 xy;
-		f32 coords[3];
+		f32 components[3];
 	};
 };
 
@@ -338,7 +351,7 @@ struct vf4
 		struct { f32 x; f32 y; f32 z; f32 w; };
 		vf3 xyz;
 		vf2 xy;
-		f32 coords[4];
+		f32 components[4];
 	};
 };
 
@@ -393,7 +406,7 @@ struct vi2
 	union
 	{
 		struct { i32 x; i32 y; };
-		i32 coords[2];
+		i32 components[2];
 	};
 };
 
@@ -403,7 +416,7 @@ struct vi3
 	{
 		struct { i32 x; i32 y; i32 z; };
 		vi2 xy;
-		i32 coords[3];
+		i32 components[3];
 	};
 };
 
@@ -414,7 +427,7 @@ struct vi4
 		struct { i32 x; i32 y; i32 z; i32 w; };
 		vi3 xyz;
 		vi2 xy;
-		i32 coords[4];
+		i32 components[4];
 	};
 };
 
@@ -482,18 +495,24 @@ internal constexpr vf4    operator/ (const vf4& v, const i32& k) { return { v.x 
 internal constexpr vf2    operator/ (const vi2& v, const f32& k) { return { v.x / k, v.y / k                   }; }
 internal constexpr vf3    operator/ (const vi3& v, const f32& k) { return { v.x / k, v.y / k, v.z / k          }; }
 internal constexpr vf4    operator/ (const vi4& v, const f32& k) { return { v.x / k, v.y / k, v.z / k, v.w / k }; }
-internal constexpr vf2    operator* (const vf2& u, const vi2& v) { return { u.x * v.x, u.y * v.y                       }; }
-internal constexpr vf3    operator* (const vf3& u, const vi3& v) { return { u.x * v.x, u.y * v.y, u.z * v.z            }; }
-internal constexpr vf4    operator* (const vf4& u, const vi4& v) { return { u.x * v.x, u.y * v.y, u.z * v.z, u.w * v.w }; }
-internal constexpr vf2    operator* (const vi2& u, const vf2& v) { return { u.x * v.x, u.y * v.y                       }; }
-internal constexpr vf3    operator* (const vi3& u, const vf3& v) { return { u.x * v.x, u.y * v.y, u.z * v.z            }; }
-internal constexpr vf4    operator* (const vi4& u, const vf4& v) { return { u.x * v.x, u.y * v.y, u.z * v.z, u.w * v.w }; }
+internal constexpr vf2    operator/ (const vf2& u, const vi2& v) { return { u.x / v.x, u.y / v.y                       }; }
+internal constexpr vf3    operator/ (const vf3& u, const vi3& v) { return { u.x / v.x, u.y / v.y, u.z / v.z            }; }
+internal constexpr vf4    operator/ (const vf4& u, const vi4& v) { return { u.x / v.x, u.y / v.y, u.z / v.z, u.w / v.w }; }
+internal constexpr vf2    operator/ (const vi2& u, const vf2& v) { return { u.x / v.x, u.y / v.y                       }; }
+internal constexpr vf3    operator/ (const vi3& u, const vf3& v) { return { u.x / v.x, u.y / v.y, u.z / v.z            }; }
+internal constexpr vf4    operator/ (const vi4& u, const vf4& v) { return { u.x / v.x, u.y / v.y, u.z / v.z, u.w / v.w }; }
 internal constexpr vf2    operator* (const vf2& v, const i32& k) { return { v.x * k, v.y * k                   }; }
 internal constexpr vf3    operator* (const vf3& v, const i32& k) { return { v.x * k, v.y * k, v.z * k          }; }
 internal constexpr vf4    operator* (const vf4& v, const i32& k) { return { v.x * k, v.y * k, v.z * k, v.w * k }; }
 internal constexpr vf2    operator* (const vi2& v, const f32& k) { return { v.x * k, v.y * k                   }; }
 internal constexpr vf3    operator* (const vi3& v, const f32& k) { return { v.x * k, v.y * k, v.z * k          }; }
 internal constexpr vf4    operator* (const vi4& v, const f32& k) { return { v.x * k, v.y * k, v.z * k, v.w * k }; }
+internal constexpr vf2    operator* (const vf2& u, const vi2& v) { return { u.x * v.x, u.y * v.y                       }; }
+internal constexpr vf3    operator* (const vf3& u, const vi3& v) { return { u.x * v.x, u.y * v.y, u.z * v.z            }; }
+internal constexpr vf4    operator* (const vf4& u, const vi4& v) { return { u.x * v.x, u.y * v.y, u.z * v.z, u.w * v.w }; }
+internal constexpr vf2    operator* (const vi2& u, const vf2& v) { return { u.x * v.x, u.y * v.y                       }; }
+internal constexpr vf3    operator* (const vi3& u, const vf3& v) { return { u.x * v.x, u.y * v.y, u.z * v.z            }; }
+internal constexpr vf4    operator* (const vi4& u, const vf4& v) { return { u.x * v.x, u.y * v.y, u.z * v.z, u.w * v.w }; }
 internal constexpr vf2    operator* (const f32& k, const vi2& v) { return v * k; }
 internal constexpr vf3    operator* (const f32& k, const vi3& v) { return v * k; }
 internal constexpr vf4    operator* (const f32& k, const vi4& v) { return v * k; }
@@ -526,16 +545,6 @@ internal constexpr vi3    vxx(const f32& x, const f32& y, const f32& z          
 internal constexpr vf4    vxx(const i32& x, const i32& y, const i32& z, const i32& w) { return { static_cast<f32>(  x), static_cast<f32>(  y), static_cast<f32>(  z), static_cast<f32>(  w) }; }
 internal constexpr vi4    vxx(const f32& x, const f32& y, const f32& z, const f32& w) { return { static_cast<i32>(  x), static_cast<i32>(  y), static_cast<i32>(  z), static_cast<i32>(  w) }; }
 
-internal constexpr vi3    vxx(const vi2& xy ,               const i32& z                  ) { return { xy .x, xy .y,     z        }; }
-internal constexpr vi4    vxx(const vi2& xy ,               const i32& z  , const i32& w  ) { return { xy .x, xy .y,     z,     w }; }
-internal constexpr vf3    vxx(const vf2& xy ,               const f32& z                  ) { return { xy .x, xy .y,     z,       }; }
-internal constexpr vf4    vxx(const vf2& xy ,               const f32& z  , const f32& w  ) { return { xy .x, xy .y,     z,     w }; }
-internal constexpr vi4    vxx(const vi3& xyz,                               const i32& w  ) { return { xyz.x, xyz.y, xyz.z,     w }; }
-internal constexpr vf4    vxx(const vf3& xyz,                               const f32& w  ) { return { xyz.x, xyz.y, xyz.z,     w }; }
-
-internal constexpr vi4    vxx(const i32& x  ,                               const vi3& yzw) { return {     x, yzw.x, yzw.y, yzw.z }; }
-internal constexpr vf4    vxx(const f32& x  ,                               const vf3& yzw) { return {     x, yzw.x, yzw.y, yzw.z }; }
-
 internal constexpr vf2    vx2(const f32& n) { return { n, n       }; }
 internal constexpr vi2    vx2(const i32& n) { return { n, n       }; }
 internal constexpr vf3    vx3(const f32& n) { return { n, n, n    }; }
@@ -543,39 +552,6 @@ internal constexpr vi3    vx3(const i32& n) { return { n, n, n    }; }
 internal constexpr vf4    vx4(const f32& n) { return { n, n, n, n }; }
 internal constexpr vi4    vx4(const i32& n) { return { n, n, n, n }; }
 
-#define VXX_COLOR_SHUFFLE_F32_(C0, C1, C2, C3) ((static_cast<u32>(static_cast<u8>((C0) * 255.0f)) << 24) | (static_cast<u32>(static_cast<u8>((C1) * 255.0f)) << 16) | (static_cast<u32>(static_cast<u8>((C2) * 255.0f)) << 8) | (static_cast<u32>(static_cast<u8>((C3) * 255.0f)) << 0))
-#define VXX_COLOR_SHUFFLE_I32_(C0, C1, C2, C3) ((static_cast<u32>(static_cast<u8>((C0)         )) << 24) | (static_cast<u32>(static_cast<u8>((C1)         )) << 16) | (static_cast<u32>(static_cast<u8>((C2)         )) << 8) | (static_cast<u32>(static_cast<u8>((C3)         )) << 0))
-internal constexpr u32 make_rgba(const vf3& rgb ) { return VXX_COLOR_SHUFFLE_F32_(rgb .x, rgb .y, rgb .z,      0); }
-internal constexpr u32 make_rgba(const vi3& rgb ) { return VXX_COLOR_SHUFFLE_I32_(rgb .x, rgb .y, rgb .z,      0); }
-internal constexpr u32 make_rgba(const vf4& rgba) { return VXX_COLOR_SHUFFLE_F32_(rgba.x, rgba.y, rgba.z, rgba.w); }
-internal constexpr u32 make_rgba(const vi4& rgba) { return VXX_COLOR_SHUFFLE_I32_(rgba.x, rgba.y, rgba.z, rgba.w); }
-
-internal constexpr u32 make_argb(const vf3& rgb ) { return VXX_COLOR_SHUFFLE_F32_(     0, rgb .x, rgb .y, rgb .z); }
-internal constexpr u32 make_argb(const vi3& rgb ) { return VXX_COLOR_SHUFFLE_I32_(     0, rgb .x, rgb .y, rgb .z); }
-internal constexpr u32 make_argb(const vf4& rgba) { return VXX_COLOR_SHUFFLE_F32_(rgba.w, rgba.x, rgba.y, rgba.z); }
-internal constexpr u32 make_argb(const vi4& rgba) { return VXX_COLOR_SHUFFLE_I32_(rgba.w, rgba.x, rgba.y, rgba.z); }
-
-internal constexpr u32 make_rgba(const f32& r, const f32& g, const f32& b              ) { return VXX_COLOR_SHUFFLE_F32_(r, g, b, 0); }
-internal constexpr u32 make_rgba(const i32& r, const i32& g, const i32& b              ) { return VXX_COLOR_SHUFFLE_I32_(r, g, b, 0); }
-internal constexpr u32 make_rgba(const f32& r, const f32& g, const f32& b, const f32& a) { return VXX_COLOR_SHUFFLE_F32_(r, g, b, a); }
-internal constexpr u32 make_rgba(const i32& r, const i32& g, const i32& b, const i32& a) { return VXX_COLOR_SHUFFLE_I32_(r, g, b, a); }
-
-internal constexpr u32 make_argb(const f32& r, const f32& g, const f32& b              ) { return VXX_COLOR_SHUFFLE_F32_(0, r, g, b); }
-internal constexpr u32 make_argb(const i32& r, const i32& g, const i32& b              ) { return VXX_COLOR_SHUFFLE_I32_(0, r, g, b); }
-internal constexpr u32 make_argb(const f32& r, const f32& g, const f32& b, const f32& a) { return VXX_COLOR_SHUFFLE_F32_(a, r, g, b); }
-internal constexpr u32 make_argb(const i32& r, const i32& g, const i32& b, const i32& a) { return VXX_COLOR_SHUFFLE_I32_(a, r, g, b); }
-#undef VXX_COLOR_SHUFFLE_F32_
-#undef VXX_COLOR_SHUFFLE_I32_
-
-internal constexpr vf4 vf4_from_rgba(const u32& n) { return {                 ((n >> 24) & 255) / 255.0f,                 ((n >> 16) & 255) / 255.0f,                 ((n >>  8) & 255) / 255.0f,                 ((n >>  0) & 255) / 255.0f }; }
-internal constexpr vf3 vf3_from_rgba(const u32& n) { return {                 ((n >> 24) & 255) / 255.0f,                 ((n >> 16) & 255) / 255.0f,                 ((n >>  8) & 255) / 255.0f                                             }; }
-internal constexpr vi4 vi4_from_rgba(const u32& n) { return { static_cast<i32>((n >> 24) & 255)         , static_cast<i32>((n >> 16) & 255)         , static_cast<i32>((n >>  8) & 255)         , static_cast<i32>((n >>  0) & 255)          }; }
-internal constexpr vi3 vi3_from_rgba(const u32& n) { return { static_cast<i32>((n >> 24) & 255)         , static_cast<i32>((n >> 16) & 255)         , static_cast<i32>((n >>  8) & 255)                                                      }; }
-
-internal constexpr vf4 vf4_from_argb(const u32& n) { return {                 ((n >> 16) & 255) / 255.0f,                 ((n >>  8) & 255) / 255.0f,                 ((n >>  0) & 255) / 255.0f,                 ((n >> 24) & 255) / 255.0f }; }
-internal constexpr vf3 vf3_from_argb(const u32& n) { return {                 ((n >> 16) & 255) / 255.0f,                 ((n >>  8) & 255) / 255.0f,                 ((n >>  0) & 255) / 255.0f                                             }; }
-internal constexpr vi4 vi4_from_argb(const u32& n) { return { static_cast<i32>((n >> 16) & 255)         , static_cast<i32>((n >>  8) & 255)         , static_cast<i32>((n >>  0) & 255)         , static_cast<i32>((n >> 24) & 255)          }; }
-internal constexpr vi3 vi3_from_argb(const u32& n) { return { static_cast<i32>((n >> 16) & 255)         , static_cast<i32>((n >>  8) & 255)         , static_cast<i32>((n >>  0) & 255)                                                      }; }
 
 template <typename TYPE>
 i32 sign(const TYPE& x)
@@ -586,10 +562,10 @@ i32 sign(const TYPE& x)
 internal constexpr f32 square(const f32& x) { return x * x;     }
 internal constexpr f32 cube  (const f32& x) { return x * x * x; }
 
-internal constexpr vf4 lerp(const vf4& a, const vf4& b, const f32& t) { return a * (1.0f - t) + b * t; }
-internal constexpr vf3 lerp(const vf3& a, const vf3& b, const f32& t) { return a * (1.0f - t) + b * t; }
-internal constexpr vf2 lerp(const vf2& a, const vf2& b, const f32& t) { return a * (1.0f - t) + b * t; }
 internal constexpr f32 lerp(const f32& a, const f32& b, const f32& t) { return a * (1.0f - t) + b * t; }
+internal constexpr vf2 lerp(const vf2& a, const vf2& b, const f32& t) { return a * (1.0f - t) + b * t; }
+internal constexpr vf3 lerp(const vf3& a, const vf3& b, const f32& t) { return a * (1.0f - t) + b * t; }
+internal constexpr vf4 lerp(const vf4& a, const vf4& b, const f32& t) { return a * (1.0f - t) + b * t; }
 
 internal constexpr vf2 conjugate(const vf2& v) { return {  v.x, -v.y }; }
 internal constexpr vi2 conjugate(const vi2& v) { return {  v.x, -v.y }; }
@@ -646,3 +622,41 @@ internal __m128 square(const __m128& x                                  ) { retu
 internal __m128 cube  (const __m128& x                                  ) { return _mm_mul_ps(_mm_mul_ps(x, x), x); }
 internal __m128 lerp  (const __m128& a, const __m128& b, const __m128& t) { return _mm_add_ps(_mm_mul_ps(a, _mm_sub_ps(m_1, t)), _mm_mul_ps(b, t)); }
 internal __m128 clamp (const __m128& x, const __m128& a, const __m128& b) { return _mm_min_ps(_mm_max_ps(x, a), b); }
+
+struct RGBA
+{
+	union
+	{
+		struct
+		{
+			u8 r;
+			u8 g;
+			u8 b;
+			u8 a;
+		};
+		u8  channels[4];
+		u32 value;
+	};
+};
+static_assert(sizeof(RGBA) == 4);
+
+internal constexpr RGBA  unpack_raw_rgba(const u32 & n) { return { (n >> 24) & 255, (n >> 16) & 255, (n >> 8) & 255, (n >>  0) & 255 }; }
+internal constexpr RGBA  unpack_raw_argb(const u32 & n) { return { (n >> 16) & 255, (n >>  8) & 255, (n >> 0) & 255, (n >> 24) & 255 }; }
+
+internal constexpr u32   pack_as_raw_rgba(const RGBA& n) { return (static_cast<u32>(n.r) << 24) | (static_cast<u32>(n.g) << 16) | (static_cast<u32>(n.b) << 8) | (static_cast<u32>(n.a) <<  0); }
+internal constexpr u32   pack_as_raw_argb(const RGBA& n) { return (static_cast<u32>(n.r) << 16) | (static_cast<u32>(n.g) <<  8) | (static_cast<u32>(n.b) << 0) | (static_cast<u32>(n.a) << 24); }
+
+internal constexpr vf3   vf3_from(const RGBA& rgba) { return { rgba.r / 255.0f, rgba.g / 255.0f, rgba.b / 255.0f                  }; }
+internal constexpr vf4   vf4_from(const RGBA& rgba) { return { rgba.r / 255.0f, rgba.g / 255.0f, rgba.b / 255.0f, rgba.a / 255.0f }; }
+internal constexpr vi3   vi3_from(const RGBA& rgba) { return { rgba.r         , rgba.g         , rgba.b                           }; }
+internal constexpr vi4   vi4_from(const RGBA& rgba) { return { rgba.r         , rgba.g         , rgba.b         , rgba.a          }; }
+
+internal constexpr RGBA  rgba_from(const vf3& v) { return { static_cast<u8>(v.x * 255.0f), static_cast<u8>(v.y * 255.0f), static_cast<u8>(v.z * 255.0f)                                  }; }
+internal constexpr RGBA  rgba_from(const vf4& v) { return { static_cast<u8>(v.x * 255.0f), static_cast<u8>(v.y * 255.0f), static_cast<u8>(v.z * 255.0f),  static_cast<u8>( v.w * 255.0f) }; }
+internal constexpr RGBA  rgba_from(const vi3& v) { return { static_cast<u8>(v.x         ), static_cast<u8>(v.y         ), static_cast<u8>(v.z         )                                  }; }
+internal constexpr RGBA  rgba_from(const vi4& v) { return { static_cast<u8>(v.x         ), static_cast<u8>(v.y         ), static_cast<u8>(v.z         ),  static_cast<u8>( v.w         ) }; }
+
+internal constexpr RGBA  rgba_from(const f32& x, const f32& y, const f32& z              ) { return { static_cast<u8>(x * 255.0f), static_cast<u8>(y * 255.0f), static_cast<u8>(z * 255.0f)                                }; }
+internal constexpr RGBA  rgba_from(const f32& x, const f32& y, const f32& z, const i32& w) { return { static_cast<u8>(x * 255.0f), static_cast<u8>(y * 255.0f), static_cast<u8>(z * 255.0f),  static_cast<u8>( w * 255.0f) }; }
+internal constexpr RGBA  rgba_from(const i32& x, const i32& y, const i32& z              ) { return { static_cast<u8>(x         ), static_cast<u8>(y         ), static_cast<u8>(z         )                                }; }
+internal constexpr RGBA  rgba_from(const i32& x, const i32& y, const i32& z, const i32& w) { return { static_cast<u8>(x         ), static_cast<u8>(y         ), static_cast<u8>(z         ),  static_cast<u8>( w         ) }; }

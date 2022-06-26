@@ -24,8 +24,8 @@ struct Chunk
 
 struct BMP
 {
-	vi2  dims;
-	u32* rgba;
+	vi2   dims;
+	RGBA* rgba;
 };
 
 enum struct Cardinal : u8
@@ -51,7 +51,7 @@ struct State
 				BMP head;
 				BMP cape;
 				BMP torso;
-			}   hero[4];
+			} hero[4];
 			BMP hero_shadow;
 			BMP background;
 		}   bmp;
@@ -64,9 +64,10 @@ struct State
 		Chunk chunks_flat[sizeof(chunks) / sizeof(Chunk)];
 	};
 
-	Chunk* hero_chunk;
-	vf2    hero_rel_pos;
-	vf2    hero_vel;
+	Chunk*   hero_chunk;
+	vf2      hero_rel_pos;
+	vf2      hero_vel;
+	Cardinal hero_direction;
 
 	vi2    camera_coords;
 	vf2    camera_rel_pos;
@@ -89,20 +90,70 @@ internal TYPE eat(PlatformFileData* file_data)
 	return value;
 }
 
-internal void set_pixel_rect(PlatformFramebuffer* platform_framebuffer, vi2 top_left, vi2 dims, u32 pixel)
+internal void draw_rect(PlatformFramebuffer* platform_framebuffer, vi2 bottom_left, vi2 dims, RGBA rgba)
 {
-	FOR_RANGE(y, max(top_left.y, 0), min(top_left.y + dims.y, platform_framebuffer->dims.y))
+	u32 pixel_value = pack_as_raw_argb(rgba);
+	FOR_RANGE(y, max(platform_framebuffer->dims.y - bottom_left.y - dims.y, 0), min(platform_framebuffer->dims.y - bottom_left.y, platform_framebuffer->dims.y))
 	{
-		FOR_RANGE(x, max(top_left.x, 0), min(top_left.x + dims.x, platform_framebuffer->dims.x))
+		FOR_RANGE(x, max(bottom_left.x, 0), min(bottom_left.x + dims.x, platform_framebuffer->dims.x))
 		{
-			platform_framebuffer->pixels[y * platform_framebuffer->dims.x + x] = pixel;
+			platform_framebuffer->pixels[y * platform_framebuffer->dims.x + x] = pixel_value;
 		}
 	}
 }
 
-internal void draw_rect(PlatformFramebuffer* platform_framebuffer, vf2 bottom_left, vf2 dims, vf3 rgb)
+#if 0
+// @TODO@ Subpixel.
+internal void draw_bmp(PlatformFramebuffer* platform_framebuffer, BMP* bmp, vf2 bottom_left, vf2 dims)
 {
-	set_pixel_rect(platform_framebuffer, vxx(bottom_left.x, platform_framebuffer->dims.y - bottom_left.y - dims.y), vxx(dims), make_argb(vxx(rgb, 1.0f)));
+	vi2 pixel_coords = vxx(bottom_left.x, platform_framebuffer->dims.y - bottom_left.y); // @TODO@ Round.
+	vi2 pixel_dims   = vxx(dims); // @TODO@ Round.
+
+	FOR_RANGE(y, max(pixel_coords.y - pixel_dims.y, 0), min(pixel_coords.y, platform_framebuffer->dims.y))
+	{
+		FOR_RANGE(x, max(pixel_coords.x, 0), min(pixel_coords.x + pixel_dims.x, platform_framebuffer->dims.x))
+		{
+			aliasing dst = platform_framebuffer->pixels[y * platform_framebuffer->dims.x + x];
+			vi2 sample_coords = vxx(vxx(x - pixel_coords.x, pixel_coords.y - 1 - y) / pixel_dims * bmp->dims); // @TODO@ Round.
+			vf4 top           = vf4_from_rgba(bmp->rgba[sample_coords.y * bmp->dims.x + sample_coords.x]);
+
+			if (top.w == 1.0f)
+			{
+				dst = pack_argb(top);
+			}
+			else
+			{
+				dst = pack_argb(lerp(vf3_from_argb(dst), top.xyz, top.w));
+			}
+		}
+	}
+}
+
+internal void draw_bmp(PlatformFramebuffer* platform_framebuffer, BMP* bmp, vf2 bottom_left, f32 scalar, vf2 center)
+{
+	draw_bmp(platform_framebuffer, bmp, bottom_left - bmp->dims * scalar * center, bmp->dims * scalar);
+}
+#endif
+
+internal void draw_bmp(PlatformFramebuffer* platform_framebuffer, BMP* bmp, vi2 bottom_left)
+{
+	FOR_RANGE(y, max(platform_framebuffer->dims.y - bottom_left.y - bmp->dims.y, 0), min(platform_framebuffer->dims.y - bottom_left.y, platform_framebuffer->dims.y))
+	{
+		FOR_RANGE(x, max(bottom_left.x, 0), min(bottom_left.x + bmp->dims.x, platform_framebuffer->dims.x))
+		{
+			aliasing dst = platform_framebuffer->pixels[y * platform_framebuffer->dims.x + x];
+			aliasing top = bmp->rgba[(platform_framebuffer->dims.y - bottom_left.y - y) * bmp->dims.x + x - bottom_left.x];
+
+			if (top.a == 255)
+			{
+				dst = pack_as_raw_argb(top);
+			}
+			else
+			{
+				dst = pack_as_raw_argb(rgba_from(lerp(vf3_from(unpack_raw_argb(dst)), vf3_from(top), top.a / 255.0f)));
+			}
+		}
+	}
 }
 
 global constexpr f32 COLLISION_EPSILON = 0.000001f;
@@ -255,6 +306,7 @@ PlatformUpdate_t(PlatformUpdate)
 				.base = platform_memory      + sizeof(State)
 			};
 
+		// @TODO@ Asset metaprogram.
 		constexpr wstrlit bmp_file_paths[] =
 			{
 				DATA_DIR L"test_hero_left_head.bmp",
@@ -330,7 +382,7 @@ PlatformUpdate_t(PlatformUpdate)
 			}
 
 			bmp->dims = header.dims;
-			bmp->rgba = memory_arena_allocate<u32>(&state->asset_arena, static_cast<u64>(bmp->dims.x) * bmp->dims.y);
+			bmp->rgba = memory_arena_allocate<RGBA>(&state->asset_arena, static_cast<u64>(bmp->dims.x) * bmp->dims.y);
 
 			// @TODO@ Microsoft specific intrinsic...
 			u32 lz_r = __lzcnt(header.mask_r);
@@ -343,10 +395,12 @@ PlatformUpdate_t(PlatformUpdate)
 				{
 					aliasing bmp_pixel = reinterpret_cast<u32*>(file_data.data + header.pixel_data_offset)[y * header.dims.x + x];
 					bmp->rgba[y * bmp->dims.x + x] =
-						(((bmp_pixel & header.mask_r) << lz_r) >>  0) |
-						(((bmp_pixel & header.mask_g) << lz_g) >>  8) |
-						(((bmp_pixel & header.mask_b) << lz_b) >> 16) |
-						(((bmp_pixel & header.mask_a) << lz_a) >> 24);
+						{
+							((bmp_pixel & header.mask_r) << lz_r) >> 24,
+							((bmp_pixel & header.mask_g) << lz_g) >> 24,
+							((bmp_pixel & header.mask_b) << lz_b) >> 24,
+							((bmp_pixel & header.mask_a) << lz_a) >> 24
+						};
 				}
 			}
 		}
@@ -389,6 +443,11 @@ PlatformUpdate_t(PlatformUpdate)
 	vf2 target_hero_vel = vxx(WASD_DOWN());
 	if (+target_hero_vel)
 	{
+		if      (target_hero_vel.x < 0.0f) { state->hero_direction = Cardinal::left;  }
+		else if (target_hero_vel.x > 0.0f) { state->hero_direction = Cardinal::right; }
+		else if (target_hero_vel.y < 0.0f) { state->hero_direction = Cardinal::down;  }
+		else if (target_hero_vel.y > 0.0f) { state->hero_direction = Cardinal::up;    }
+
 		target_hero_vel = normalize(target_hero_vel) * 1.78816f;
 
 		if (BTN_DOWN(.shift))
@@ -419,7 +478,7 @@ PlatformUpdate_t(PlatformUpdate)
 							result,
 							collide_against_rounded_rectangle
 							(
-								state->hero_chunk->coords * METERS_PER_CHUNK + state->hero_rel_pos,
+								state->hero_chunk->coords * METERS_PER_CHUNK + state->hero_rel_pos - vf2 { HERO_HITBOX_DIMS.x / 2.0f, 0.0f },
 								displacement,
 								chunk->coords * METERS_PER_CHUNK + wall->rel_pos - HERO_HITBOX_DIMS,
 								wall->dims + HERO_HITBOX_DIMS,
@@ -478,10 +537,9 @@ PlatformUpdate_t(PlatformUpdate)
 	// Render.
 	//
 
-	FOR_ELEMS(it, platform_framebuffer->pixels, platform_framebuffer->dims.x * platform_framebuffer->dims.y)
-	{
-		*it = make_argb(0, 0, 0, 255);
-	}
+	memset(platform_framebuffer->pixels, 0, platform_framebuffer->dims.x * platform_framebuffer->dims.y * sizeof(u32));
+
+	draw_bmp(platform_framebuffer, &state->bmp.background, { 0, 0 });
 
 	FOR_ELEMS(chunk, state->chunks_flat)
 	{
@@ -490,9 +548,9 @@ PlatformUpdate_t(PlatformUpdate)
 			draw_rect
 			(
 				platform_framebuffer,
-				((chunk->coords - state->camera_coords) * METERS_PER_CHUNK + wall->rel_pos - state->camera_rel_pos) * PIXELS_PER_METER,
-				wall->dims * PIXELS_PER_METER,
-				{ 0.25f, 0.275f, 0.3f }
+				vxx(((chunk->coords - state->camera_coords) * METERS_PER_CHUNK + wall->rel_pos - state->camera_rel_pos) * PIXELS_PER_METER),
+				vxx(wall->dims * PIXELS_PER_METER),
+				rgba_from(0.15f, 0.225f, 0.2f)
 			);
 		}
 	}
@@ -501,31 +559,23 @@ PlatformUpdate_t(PlatformUpdate)
 	draw_rect
 	(
 		platform_framebuffer,
-		((state->hero_chunk->coords - state->camera_coords) * METERS_PER_CHUNK + state->hero_rel_pos - state->camera_rel_pos) * PIXELS_PER_METER,
-		HERO_RENDER_DIMS * PIXELS_PER_METER,
-		{ 0.85f, 0.87f, 0.3f }
+		vxx(((state->hero_chunk->coords - state->camera_coords) * METERS_PER_CHUNK + state->hero_rel_pos - state->camera_rel_pos - vf2 { HERO_RENDER_DIMS.x / 2.0f, 0.0f }) * PIXELS_PER_METER),
+		vxx(HERO_RENDER_DIMS * PIXELS_PER_METER),
+		rgba_from(0.85f, 0.87f, 0.3f)
 	);
 
 	draw_rect
 	(
 		platform_framebuffer,
-		((state->hero_chunk->coords - state->camera_coords) * METERS_PER_CHUNK + state->hero_rel_pos - state->camera_rel_pos) * PIXELS_PER_METER,
-		HERO_HITBOX_DIMS * PIXELS_PER_METER,
-		{ 0.9f, 0.5f, 0.1f }
+		vxx(((state->hero_chunk->coords - state->camera_coords) * METERS_PER_CHUNK + state->hero_rel_pos - state->camera_rel_pos - vf2 { HERO_RENDER_DIMS.x / 2.0f, 0.0f }) * PIXELS_PER_METER),
+		vxx(HERO_HITBOX_DIMS * PIXELS_PER_METER),
+		rgba_from(0.9f, 0.5f, 0.1f)
 	);
 
-	aliasing bmp = state->bmp.hero[0].head;
-	FOR_RANGE(y, bmp.dims.y)
-	{
-		FOR_RANGE(x, bmp.dims.x)
-		{
-			aliasing dst = platform_framebuffer->pixels[(platform_framebuffer->dims.y - 1 - y) * platform_framebuffer->dims.x + x];
-			vf4 bot = vf4_from_argb(dst);
-			vf4 top = vf4_from_rgba(bmp.rgba[y * bmp.dims.x + x]);
-			f32 new_alpha = top.w + bot.w * (1.0f - top.w);
-			dst = make_argb(vxx(lerp(bot.xyz * bot.w, top.xyz, top.w) / new_alpha, new_alpha));
-		}
-	}
+	vi2 hero_screen_coords = vxx(((state->hero_chunk->coords - state->camera_coords) * METERS_PER_CHUNK + state->hero_rel_pos - state->camera_rel_pos) * PIXELS_PER_METER - state->bmp.hero[static_cast<i32>(state->hero_direction)].torso.dims * vf2 { 0.5f, 0.15f });
+	draw_bmp(platform_framebuffer, &state->bmp.hero[static_cast<i32>(state->hero_direction)].torso, hero_screen_coords);
+	draw_bmp(platform_framebuffer, &state->bmp.hero[static_cast<i32>(state->hero_direction)].cape , hero_screen_coords);
+	draw_bmp(platform_framebuffer, &state->bmp.hero[static_cast<i32>(state->hero_direction)].head , hero_screen_coords);
 
 	#if DEBUG_AUDIO
 	state->hertz = 512.0f + platform_input->gamepads[0].stick_right.y * 100.0f;
