@@ -559,6 +559,7 @@ i32 sign(const TYPE& x)
 	return (static_cast<TYPE>(0) < x) - (x < static_cast<TYPE>(0));
 }
 
+internal constexpr i32 square(const i32& x) { return x * x;     }
 internal constexpr f32 square(const f32& x) { return x * x;     }
 internal constexpr f32 cube  (const f32& x) { return x * x * x; }
 

@@ -5,6 +5,7 @@
 #define DEBUG_AUDIO 0
 
 // @TODO@ Memory arena that return 0 if there isn't enough space left?
+// @TODO@ Handle world chunk edges.
 
 constexpr f32 PIXELS_PER_METER = 50.0f;
 constexpr f32 METERS_PER_CHUNK = 16.0f;
@@ -72,6 +73,12 @@ struct State
 	vf2        hero_rel_pos;
 	vf2        hero_vel;
 	Cardinal   hero_direction;
+
+	f32        pet_hover_t;
+	Chunk*     pet_chunk;
+	vf2        pet_rel_pos;
+	vf2        pet_vel;
+	Cardinal   pet_direction;
 
 	vi2        camera_coords;
 	vf2        camera_rel_pos;
@@ -146,7 +153,7 @@ internal void draw_bmp(PlatformFramebuffer* platform_framebuffer, BMP* bmp, vi2 
 		FOR_RANGE(x, max(bottom_left.x, 0), min(bottom_left.x + bmp->dims.x, platform_framebuffer->dims.x))
 		{
 			aliasing dst = platform_framebuffer->pixels[y * platform_framebuffer->dims.x + x];
-			aliasing top = bmp->rgba[(platform_framebuffer->dims.y - bottom_left.y - y) * bmp->dims.x + x - bottom_left.x];
+			aliasing top = bmp->rgba[(platform_framebuffer->dims.y - bottom_left.y - 1 - y) * bmp->dims.x + x - bottom_left.x];
 
 			if (top.a == 255)
 			{
@@ -155,6 +162,26 @@ internal void draw_bmp(PlatformFramebuffer* platform_framebuffer, BMP* bmp, vi2 
 			else if (top.a)
 			{
 				dst = pack_as_raw_argb(rgba_from(lerp(vf3_from(unpack_raw_argb(dst)), vf3_from(top), top.a / 255.0f)));
+			}
+		}
+	}
+}
+
+internal void draw_circle(PlatformFramebuffer* platform_framebuffer, vi2 pos, i32 radius, RGBA rgba)
+{
+	i32 x0          = clamp(                               pos.x - radius, 0, platform_framebuffer->dims.x);
+	i32 x1          = clamp(                               pos.x + radius, 0, platform_framebuffer->dims.x);
+	i32 y0          = clamp(platform_framebuffer->dims.y - pos.y - radius, 0, platform_framebuffer->dims.y);
+	i32 y1          = clamp(platform_framebuffer->dims.y - pos.y + radius, 0, platform_framebuffer->dims.y);
+	u32 pixel_value = pack_as_raw_argb(rgba);
+
+	FOR_RANGE(x, x0, x1)
+	{
+		FOR_RANGE(y, y0, y1)
+		{
+			if (square(x - pos.x) + square(y - platform_framebuffer->dims.y + pos.y) <= square(radius))
+			{
+				platform_framebuffer->pixels[y * platform_framebuffer->dims.x + x] = pixel_value;
 			}
 		}
 	}
@@ -482,45 +509,47 @@ PlatformUpdate_t(PlatformUpdate)
 
 		state->hero_chunk   = get_chunk(state, { 0, 0 });
 		state->hero_rel_pos = { 5.0f, 7.0f };
+
+		state->pet_chunk   = get_chunk(state, { 0, 0 });
+		state->pet_rel_pos = { 7.0f, 9.0f };
 	}
 
 	//
-	// Update.
+	// (Update) Hero.
 	//
 
-	vf2 target_hero_vel = vxx(WASD_DOWN());
-	if (+target_hero_vel)
+	constexpr f32 HERO_HITBOX_RADIUS = 0.3f;
+	constexpr f32 PET_HITBOX_RADIUS  = 0.3f;
 	{
-		if      (target_hero_vel.x < 0.0f) { state->hero_direction = Cardinal::left;  }
-		else if (target_hero_vel.x > 0.0f) { state->hero_direction = Cardinal::right; }
-		else if (target_hero_vel.y < 0.0f) { state->hero_direction = Cardinal::down;  }
-		else if (target_hero_vel.y > 0.0f) { state->hero_direction = Cardinal::up;    }
-
-		target_hero_vel = normalize(target_hero_vel) * 1.78816f;
-
-		if (BTN_DOWN(.shift))
+		vf2 target_hero_vel = vxx(WASD_DOWN());
+		if (+target_hero_vel)
 		{
-			target_hero_vel *= 2.0f;
+			if      (target_hero_vel.x < 0.0f) { state->hero_direction = Cardinal::left;  }
+			else if (target_hero_vel.x > 0.0f) { state->hero_direction = Cardinal::right; }
+			else if (target_hero_vel.y < 0.0f) { state->hero_direction = Cardinal::down;  }
+			else if (target_hero_vel.y > 0.0f) { state->hero_direction = Cardinal::up;    }
+
+			target_hero_vel = normalize(target_hero_vel) * 1.78816f;
+
+			if (BTN_DOWN(.shift))
+			{
+				target_hero_vel *= 2.0f;
+			}
 		}
-	}
 
-	state->hero_vel = dampen(state->hero_vel, target_hero_vel, 0.001f, platform_delta_time);
+		state->hero_vel = dampen(state->hero_vel, target_hero_vel, 0.001f, platform_delta_time);
 
-	constexpr vf2 HERO_HITBOX_DIMS = { 0.7f, 0.4f };
-	constexpr f32 WALL_PADDING     = 0.1f;
-
-	{ // @TODO@ Better performing collision.
 		vf2 displacement = state->hero_vel * platform_delta_time;
 
+		// @TODO@ Better performing collision.
 		FOR_RANGE(8)
 		{
 			CollisionResult result = {};
 
 			// @TODO@ This checks chunks in a 3x3 adjacenct fashion. Could be better.
-
 			FOR_RANGE(i, 9)
 			{
-				Chunk* chunk = get_chunk(state, state->hero_chunk->coords + vi2 { i % 3, i / 3 });
+				Chunk* chunk = get_chunk(state, state->hero_chunk->coords + vi2 { i % 3 - 1, i / 3 - 1 });
 
 				FOR_ELEMS(wall, chunk->wall_buffer, chunk->wall_count)
 				{
@@ -530,44 +559,156 @@ PlatformUpdate_t(PlatformUpdate)
 							result,
 							collide_against_rounded_rectangle
 							(
-								state->hero_chunk->coords * METERS_PER_CHUNK + state->hero_rel_pos - vf2 { HERO_HITBOX_DIMS.x / 2.0f, 0.0f },
+								state->hero_chunk->coords * METERS_PER_CHUNK + state->hero_rel_pos,
 								displacement,
-								chunk->coords * METERS_PER_CHUNK + wall->rel_pos - HERO_HITBOX_DIMS,
-								wall->dims + HERO_HITBOX_DIMS,
-								WALL_PADDING
+								chunk->coords * METERS_PER_CHUNK + wall->rel_pos,
+								wall->dims,
+								HERO_HITBOX_RADIUS
 							)
 						);
 				}
 			}
 
-			lambda displace_hero =
-				[&](vf2 delta_pos)
-				{
-					state->hero_rel_pos += delta_pos;
+			result =
+				prioritize_collision_results
+				(
+					result,
+					collide_against_circle
+					(
+						state->hero_chunk->coords * METERS_PER_CHUNK + state->hero_rel_pos,
+						displacement,
+						state->pet_chunk->coords * METERS_PER_CHUNK + state->pet_rel_pos,
+						HERO_HITBOX_RADIUS + PET_HITBOX_RADIUS
+					)
+				);
 
-					vi2 delta_coords = { 0, 0 };
-					if      (state->hero_rel_pos.x <              0.0f) { delta_coords.x -= 1; }
-					else if (state->hero_rel_pos.x >= METERS_PER_CHUNK) { delta_coords.x += 1; }
-					if      (state->hero_rel_pos.y <              0.0f) { delta_coords.y -= 1; }
-					else if (state->hero_rel_pos.y >= METERS_PER_CHUNK) { delta_coords.y += 1; }
-					ASSERT(state->hero_chunk->exists);
-					state->hero_chunk    = get_chunk(state, state->hero_chunk->coords + delta_coords);
-					state->hero_rel_pos -= delta_coords * METERS_PER_CHUNK;
-				};
+			state->hero_rel_pos +=
+				result.type == CollisionType::none
+					? displacement
+					: result.new_displacement;
+
+			vi2 delta_coords = { 0, 0 };
+			if      (state->hero_rel_pos.x <              0.0f) { delta_coords.x -= 1; }
+			else if (state->hero_rel_pos.x >= METERS_PER_CHUNK) { delta_coords.x += 1; }
+			if      (state->hero_rel_pos.y <              0.0f) { delta_coords.y -= 1; }
+			else if (state->hero_rel_pos.y >= METERS_PER_CHUNK) { delta_coords.y += 1; }
+			ASSERT(state->hero_chunk->exists);
+			state->hero_chunk    = get_chunk(state, state->hero_chunk->coords + delta_coords);
+			state->hero_rel_pos -= delta_coords * METERS_PER_CHUNK;
 
 			if (result.type == CollisionType::none)
 			{
-				displace_hero(displacement);
 				break;
 			}
 			else
 			{
-				displace_hero(result.new_displacement);
 				state->hero_vel = dot(state->hero_vel - result.new_displacement, rotate90(result.normal)) * rotate90(result.normal);
 				displacement    = dot(displacement    - result.new_displacement, rotate90(result.normal)) * rotate90(result.normal);
 			}
 		}
 	}
+
+	//
+	// (Update) Pet.
+	//
+
+	state->pet_hover_t = mod(state->pet_hover_t + platform_delta_time / 4.0f, 1.0f);
+
+	{
+		{
+			vf2 target_pet_vel   = { 0.0f, 0.0f };
+			vf2 ray_to_hero      = (state->hero_chunk->coords - state->pet_chunk->coords) * METERS_PER_CHUNK + state->hero_rel_pos- state->pet_rel_pos;
+			f32 distance_to_hero = norm(ray_to_hero);
+			if (IN_RANGE(distance_to_hero, 1.0f, 7.0f))
+			{
+				ray_to_hero /= distance_to_hero;
+
+				if (distance_to_hero > 3.0f)
+				{
+					target_pet_vel = ray_to_hero * 2.0f;
+				}
+
+				if      (ray_to_hero.x < -1.0f / SQRT2) { state->pet_direction = Cardinal::left;  }
+				else if (ray_to_hero.x >  1.0f / SQRT2) { state->pet_direction = Cardinal::right; }
+				else if (ray_to_hero.y < -1.0f / SQRT2) { state->pet_direction = Cardinal::down;  }
+				else if (ray_to_hero.y >  1.0f / SQRT2) { state->pet_direction = Cardinal::up;    }
+			}
+
+			state->pet_vel = dampen(state->pet_vel, target_pet_vel, 0.1f, platform_delta_time);
+		}
+
+		vf2 displacement = state->pet_vel * platform_delta_time;
+
+		// @TODO@ Better performing collision.
+		FOR_RANGE(8)
+		{
+			CollisionResult result = {};
+
+			// @TODO@ This checks chunks in a 3x3 adjacenct fashion. Could be better.
+			FOR_RANGE(i, 9)
+			{
+				Chunk* chunk = get_chunk(state, state->pet_chunk->coords + vi2 { i % 3 - 1, i / 3 - 1 });
+
+				FOR_ELEMS(wall, chunk->wall_buffer, chunk->wall_count)
+				{
+					result =
+						prioritize_collision_results
+						(
+							result,
+							collide_against_rounded_rectangle
+							(
+								state->pet_chunk->coords * METERS_PER_CHUNK + state->pet_rel_pos,
+								displacement,
+								chunk->coords * METERS_PER_CHUNK + wall->rel_pos,
+								wall->dims,
+								PET_HITBOX_RADIUS
+							)
+						);
+				}
+			}
+
+			result =
+				prioritize_collision_results
+				(
+					result,
+					collide_against_circle
+					(
+						state->pet_chunk->coords * METERS_PER_CHUNK + state->pet_rel_pos,
+						displacement,
+						state->hero_chunk->coords * METERS_PER_CHUNK + state->hero_rel_pos,
+						HERO_HITBOX_RADIUS + PET_HITBOX_RADIUS
+					)
+				);
+
+			state->pet_rel_pos +=
+				result.type == CollisionType::none
+					? displacement
+					: result.new_displacement;
+
+			vi2 delta_coords = { 0, 0 };
+			if      (state->pet_rel_pos.x <              0.0f) { delta_coords.x -= 1; }
+			else if (state->pet_rel_pos.x >= METERS_PER_CHUNK) { delta_coords.x += 1; }
+			if      (state->pet_rel_pos.y <              0.0f) { delta_coords.y -= 1; }
+			else if (state->pet_rel_pos.y >= METERS_PER_CHUNK) { delta_coords.y += 1; }
+			ASSERT(state->pet_chunk->exists);
+			state->pet_chunk    = get_chunk(state, state->pet_chunk->coords + delta_coords);
+			state->pet_rel_pos -= delta_coords * METERS_PER_CHUNK;
+
+			if (result.type == CollisionType::none)
+			{
+				break;
+			}
+			else
+			{
+				state->pet_vel = dot(state->pet_vel - result.new_displacement, rotate90(result.normal)) * rotate90(result.normal);
+				displacement   = dot(displacement   - result.new_displacement, rotate90(result.normal)) * rotate90(result.normal);
+			}
+		}
+	}
+
+	//
+	// (Update) camera.
+	//
 
 	vf2 target_camera_vel = vxx(HJKL_DOWN());
 	if (+target_camera_vel)
@@ -582,7 +723,7 @@ PlatformUpdate_t(PlatformUpdate)
 	if      (state->camera_rel_pos.y <              0.0f) { state->camera_coords.y -= 1; state->camera_rel_pos.y += METERS_PER_CHUNK; }
 	else if (state->camera_rel_pos.y >= METERS_PER_CHUNK) { state->camera_coords.y += 1; state->camera_rel_pos.y -= METERS_PER_CHUNK; }
 
-	//DEBUG_printf("(%i %i) (%f %f) <%i %i> <%f %f>\n", PASS_V2(state->hero_chunk->coords), PASS_V2(state->hero_rel_pos), PASS_V2(state->camera_coords), PASS_V2(state->camera_rel_pos));
+	//DEBUG_printf("(%f %f)\n", PASS_V2(state->hero_rel_pos));
 
 	//
 	// Render.
@@ -592,8 +733,7 @@ PlatformUpdate_t(PlatformUpdate)
 
 	draw_bmp(platform_framebuffer, &state->bmp.background, { 0, 0 });
 
-	// @TODO@ This is going through the hash table to render. Bad!
-	FOR_ELEMS(chunk_node, state->chunk_node_hash_table)
+	FOR_ELEMS(chunk_node, state->chunk_node_hash_table) // @TODO@ This is going through the hash table to render. Bad!
 	{
 		if (chunk_node->chunk.exists)
 		{
@@ -610,31 +750,39 @@ PlatformUpdate_t(PlatformUpdate)
 		}
 	}
 
-	constexpr vf2 HERO_RENDER_DIMS = { 0.7f, 1.7399f };
-	draw_rect
+	draw_circle
 	(
 		platform_framebuffer,
-		vxx(((state->hero_chunk->coords - state->camera_coords) * METERS_PER_CHUNK + state->hero_rel_pos - state->camera_rel_pos - vf2 { HERO_RENDER_DIMS.x / 2.0f, 0.0f }) * PIXELS_PER_METER),
-		vxx(HERO_RENDER_DIMS * PIXELS_PER_METER),
-		rgba_from(0.85f, 0.87f, 0.3f)
-	);
-
-	draw_rect
-	(
-		platform_framebuffer,
-		vxx(((state->hero_chunk->coords - state->camera_coords) * METERS_PER_CHUNK + state->hero_rel_pos - state->camera_rel_pos - vf2 { HERO_RENDER_DIMS.x / 2.0f, 0.0f }) * PIXELS_PER_METER),
-		vxx(HERO_HITBOX_DIMS * PIXELS_PER_METER),
+		vxx(((state->hero_chunk->coords - state->camera_coords) * METERS_PER_CHUNK + state->hero_rel_pos - state->camera_rel_pos) * PIXELS_PER_METER),
+		static_cast<i32>(HERO_HITBOX_RADIUS * PIXELS_PER_METER),
 		rgba_from(0.9f, 0.5f, 0.1f)
 	);
 
-	vi2 hero_screen_coords = vxx(((state->hero_chunk->coords - state->camera_coords) * METERS_PER_CHUNK + state->hero_rel_pos - state->camera_rel_pos) * PIXELS_PER_METER - state->bmp.hero[static_cast<i32>(state->hero_direction)].torso.dims * vf2 { 0.5f, 0.15f });
-	draw_bmp(platform_framebuffer, &state->bmp.hero[static_cast<i32>(state->hero_direction)].torso, hero_screen_coords);
-	draw_bmp(platform_framebuffer, &state->bmp.hero[static_cast<i32>(state->hero_direction)].cape , hero_screen_coords);
-	draw_bmp(platform_framebuffer, &state->bmp.hero[static_cast<i32>(state->hero_direction)].head , hero_screen_coords);
+	{
+		vi2 hero_screen_coords = vxx(((state->hero_chunk->coords - state->camera_coords) * METERS_PER_CHUNK + state->hero_rel_pos - state->camera_rel_pos) * PIXELS_PER_METER - state->bmp.hero[0].torso.dims * vf2 { 0.5f, 0.225f });
+		draw_bmp(platform_framebuffer, &state->bmp.hero_shadow, hero_screen_coords);
+		draw_bmp(platform_framebuffer, &state->bmp.hero[static_cast<i32>(state->hero_direction)].torso, hero_screen_coords);
+		draw_bmp(platform_framebuffer, &state->bmp.hero[static_cast<i32>(state->hero_direction)].cape , hero_screen_coords);
+		draw_bmp(platform_framebuffer, &state->bmp.hero[static_cast<i32>(state->hero_direction)].head , hero_screen_coords);
+	}
+
+	draw_circle
+	(
+		platform_framebuffer,
+		vxx(((state->pet_chunk->coords - state->camera_coords) * METERS_PER_CHUNK + state->pet_rel_pos - state->camera_rel_pos) * PIXELS_PER_METER),
+		static_cast<i32>(PET_HITBOX_RADIUS * PIXELS_PER_METER),
+		rgba_from(0.9f, 0.5f, 0.8f)
+	);
+
+	{
+		vi2 pet_screen_coords = vxx(((state->pet_chunk->coords - state->camera_coords) * METERS_PER_CHUNK + state->pet_rel_pos - state->camera_rel_pos) * PIXELS_PER_METER - state->bmp.hero[0].torso.dims * vf2 { 0.5f, 0.225f });
+		draw_bmp(platform_framebuffer, &state->bmp.hero_shadow, pet_screen_coords);
+		draw_bmp(platform_framebuffer, &state->bmp.hero[static_cast<i32>(state->pet_direction)].head, vxx(pet_screen_coords + vf2 { 0.0f, -0.4f * (1.0f - cosf(state->pet_hover_t * TAU)) / 2.0f } * PIXELS_PER_METER));
+	}
 
 	#if DEBUG_AUDIO
 	state->hertz = 512.0f + platform_input->gamepads[0].stick_right.y * 100.0f;
-	state->t     = fmodf(state->t, TAU);
+	state->t     = mod(state->t, TAU);
 	#endif
 
 	return PlatformUpdateExitCode::normal;
