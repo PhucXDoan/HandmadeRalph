@@ -63,7 +63,7 @@ typedef double         f64;
 #define FOR_ARRAY_REV_(NAME, XS)            FOR_POINTER_REV_(NAME, (XS), ARRAY_CAPACITY(XS))
 #define FOR_ELEMS_REV(...)                  MACRO_EXPAND_(MACRO_OVERLOADED_3_(__VA_ARGS__, FOR_POINTER_REV_, FOR_ARRAY_REV_)(__VA_ARGS__))
 
-#define FOR_NODES_(NAME, NODES)             if (auto NAME = (NODES); false); else for (i32 MACRO_CONCAT(NAME, _index) = 0; NAME; MACRO_CONCAT(NAME, _index) += 1, NAME = NAME->next_node)
+#define FOR_NODES_(NAME, NODES)             if (auto NAME = (NODES); false); else for (i32 MACRO_CONCAT(NAME, _index) = 0; NAME; MACRO_CONCAT(NAME, _index) += 1, NAME = NAME->next)
 #define FOR_IT_NODES_(NODES)                FOR_NODES_(it, (NODES))
 #define FOR_NODES(...)                      MACRO_EXPAND_(MACRO_OVERLOADED_2_(__VA_ARGS__, FOR_NODES_, FOR_IT_NODES_)(__VA_ARGS__))
 
@@ -89,7 +89,7 @@ typedef double         f64;
 
 	#define DEBUG_persist static
 
-	#define ASSERT(EXPRESSION) do { if (!(EXPRESSION)) { *((i32*)(0)) = 0; } } while (false)
+	#define ASSERT(EXPRESSION) do { if (!(EXPRESSION)) { *reinterpret_cast<i32*>(0) = 0; } } while (false)
 
 	#define DEBUG_printf(FSTR, ...)\
 	do\
@@ -150,7 +150,7 @@ typedef double         f64;
 		printf\
 		(\
 			"======================== DEBUG_STDOUT_HALT ========================\n"\
-			"A stdout halt occured from file `" __FILE__ "` on line " MACRO_STRINGIFY_(__LINE__) ".\n"\
+			"A stdout halt occured from file `" __FILE__ "` on line " MACRO_STRINGIFY(__LINE__) ".\n"\
 			"===================================================================\n"\
 		);\
 		fgetc(stdin);\
@@ -192,8 +192,8 @@ internal constexpr NAME operator<<=(      NAME& a, const i32&  n) { return a = s
 internal constexpr NAME operator>>=(      NAME& a, const i32&  n) { return a = static_cast<NAME>( (+a) >> n  ); }\
 enum struct NAME : TYPE
 
-#define enum_start_region(NAME) MACRO_CONCAT(NAME, _START), MACRO_CONCAT(NAME, _START_) = MACRO_CONCAT(NAME, _START) - 1,
-#define enum_end_region(NAME)   MACRO_CONCAT(NAME, _END), MACRO_CONCAT(NAME, _COUNT) = MACRO_CONCAT(NAME, _END) - MACRO_CONCAT(NAME, _START), MACRO_CONCAT(NAME, _END_) = MACRO_CONCAT(NAME, _END) - 1,
+#define enum_region_start(NAME) MACRO_CONCAT(NAME, _START), MACRO_CONCAT(NAME, _START_) = MACRO_CONCAT(NAME, _START) - 1,
+#define enum_region_end(NAME)   MACRO_CONCAT(NAME, _END), MACRO_CONCAT(NAME, _COUNT) = MACRO_CONCAT(NAME, _END) - MACRO_CONCAT(NAME, _START), MACRO_CONCAT(NAME, _END_) = MACRO_CONCAT(NAME, _END) - 1,
 
 #include <utility>
 #define DEFER auto MACRO_CONCAT(DEFER_, __LINE__) = DEFER_EMPTY_ {} + [&]()
@@ -661,3 +661,21 @@ internal constexpr RGBA  rgba_from(const f32& x, const f32& y, const f32& z     
 internal constexpr RGBA  rgba_from(const f32& x, const f32& y, const f32& z, const i32& w) { return { static_cast<u8>(x * 255.0f), static_cast<u8>(y * 255.0f), static_cast<u8>(z * 255.0f),  static_cast<u8>( w * 255.0f) }; }
 internal constexpr RGBA  rgba_from(const i32& x, const i32& y, const i32& z              ) { return { static_cast<u8>(x         ), static_cast<u8>(y         ), static_cast<u8>(z         )                                }; }
 internal constexpr RGBA  rgba_from(const i32& x, const i32& y, const i32& z, const i32& w) { return { static_cast<u8>(x         ), static_cast<u8>(y         ), static_cast<u8>(z         ),  static_cast<u8>( w         ) }; }
+
+internal constexpr bool32 is_alpha(const char& c) { return IN_RANGE(c, 'a', 'z' + 1) || IN_RANGE(c, 'A', 'Z' + 1); }
+internal constexpr bool32 is_digit(const char& c) { return IN_RANGE(c, '0', '9' + 1); }
+
+internal constexpr char   uppercase(const char& c) { return IN_RANGE(c, 'a', 'z' + 1) ? c - 'a' + 'A' : c; }
+internal constexpr char   lowercase(const char& c) { return IN_RANGE(c, 'A', 'Z' + 1) ? c - 'A' + 'a' : c; }
+
+#define STRING_VIEW_OF(STRLIT) (StringView { .size = sizeof(STRLIT) - 1, .data = (STRLIT) })
+
+struct StringView
+{
+	i32         size;
+	const char* data;
+};
+
+internal constexpr bool32 operator==(const StringView& a, const StringView& b) { return a.size == b.size && memcmp(a.data, b.data, static_cast<size_t>(a.size)) == 0; }
+internal constexpr bool32 operator!=(const StringView& a, const StringView& b) { return !(a == b); }
+

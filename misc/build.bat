@@ -22,6 +22,8 @@ pushd W:\build\
 			goto ABORT
 		)
 
+		goto ABORT
+
 		metaprogram.exe
 		if !ERRORLEVEL! neq 0 (
 			echo Metaprogram execution failed.
