@@ -15,11 +15,32 @@ pushd W:\build\
 		echo Release build
 	) else (
 		echo Debug build
+
+		cl /nologo /DDATA_DIR="\"W:/data/\"" /DEXE_DIR="\"W:/build/\"" /DSRC_DIR="\"W:/src/\"" /std:c++20 /Od /Oi /DDEBUG=1 /Z7 /MTd /GR- /EHsc /EHa- /WX %DEBUG_WARNINGS% /permissive-                      W:\src\metaprogram.cpp         /link                                             /debug:FULL /opt:ref /incremental:no
+		if !ERRORLEVEL! neq 0 (
+			echo Metaprogram compilation failed.
+			goto ABORT
+		)
+
+		metaprogram.exe
+		if !ERRORLEVEL! neq 0 (
+			echo Metaprogram execution failed.
+			goto ABORT
+		)
+
 		del *.pdb > NUL 2> NUL
 		echo 0 > LOCK.temp
-		cl /nologo /DDATA_DIR="\"W:/data/\"" /DEXE_DIR="\"W:/build/\"" /DSRC_DIR="\"W:/src/\"" /std:c++20 /Od /Oi /DDEBUG=1 /Z7 /MTd /GR- /EHsc /EHa- %DEBUG_WARNINGS% /permissive- /LD                  W:\src\HandmadeRalph.cpp       /link /PDB:HandmadeRalph_%RANDOM%.pdb %LIBRARIES% /debug:FULL /opt:ref /incremental:no /export:PlatformUpdate /export:PlatformSound
+		cl /nologo /DDATA_DIR="\"W:/data/\"" /DEXE_DIR="\"W:/build/\"" /DSRC_DIR="\"W:/src/\"" /std:c++20 /Od /Oi /DDEBUG=1 /Z7 /MTd /GR- /EHsc /EHa-     %DEBUG_WARNINGS% /permissive- /LD                  W:\src\HandmadeRalph.cpp       /link /PDB:HandmadeRalph_%RANDOM%.pdb %LIBRARIES% /debug:FULL /opt:ref /incremental:no /export:PlatformUpdate /export:PlatformSound
 		del LOCK.temp
-		cl /nologo /DDATA_DIR="\"W:/data/\"" /DEXE_DIR="\"W:/build/\"" /DSRC_DIR="\"W:/src/\"" /std:c++20 /Od /Oi /DDEBUG=1 /Z7 /MTd /GR- /EHsc /EHa- %DEBUG_WARNINGS% /permissive- /FeHandmadeRalph.exe W:\src\HandmadeRalph_win32.cpp /link                                 %LIBRARIES% /debug:FULL /opt:ref /incremental:no /subsystem:windows
+
+		copy NUL HandmadeRalph.exe > NUL 2>&1
+		if !ERRORLEVEL! neq 0 (
+			goto ABORT
+		)
+
+		cl /nologo /DDATA_DIR="\"W:/data/\"" /DEXE_DIR="\"W:/build/\"" /DSRC_DIR="\"W:/src/\"" /std:c++20 /Od /Oi /DDEBUG=1 /Z7 /MTd /GR- /EHsc /EHa-     %DEBUG_WARNINGS% /permissive- /FeHandmadeRalph.exe W:\src\HandmadeRalph_win32.cpp /link                                 %LIBRARIES% /debug:FULL /opt:ref /incremental:no /subsystem:windows
+
+		:ABORT
 		del *.obj *.lib *.exp > NUL 2> NUL
 	)
 popd

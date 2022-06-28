@@ -54,17 +54,15 @@ struct State
 	{
 		struct
 		{
-			struct
-			{
-				BMP head;
-				BMP cape;
-				BMP torso;
-			} hero[4];
-			BMP hero_shadow;
-			BMP background;
+			BMP hero_head  [4]; // @META@ test_hero_left_head.bmp , test_hero_right_head.bmp , test_hero_front_head.bmp , test_hero_back_head.bmp
+			BMP hero_cape  [4]; // @META@ test_hero_left_cape.bmp , test_hero_right_cape.bmp , test_hero_front_cape.bmp , test_hero_back_cape.bmp
+			BMP hero_torso [4]; // @META@ test_hero_left_torso.bmp, test_hero_right_torso.bmp, test_hero_front_torso.bmp, test_hero_back_torso.bmp
+			BMP hero_shadow;    // @META@ test_hero_shadow.bmp
+			BMP background;     // @META@ test_background.bmp
 		}   bmp;
 		BMP bmps[sizeof(bmp) / sizeof(BMP)];
 	};
+	#include "meta/bmp_file_paths.h"
 
 	ChunkNode* available_chunk_node;
 	ChunkNode  chunk_node_hash_table[64];
@@ -382,29 +380,10 @@ PlatformUpdate_t(PlatformUpdate)
 				.base = platform_memory      + sizeof(State)
 			};
 
-		// @TODO@ Asset metaprogram.
-		constexpr wstrlit bmp_file_paths[] =
-			{
-				DATA_DIR L"test_hero_left_head.bmp",
-				DATA_DIR L"test_hero_left_cape.bmp",
-				DATA_DIR L"test_hero_left_torso.bmp",
-				DATA_DIR L"test_hero_right_head.bmp",
-				DATA_DIR L"test_hero_right_cape.bmp",
-				DATA_DIR L"test_hero_right_torso.bmp",
-				DATA_DIR L"test_hero_front_head.bmp",
-				DATA_DIR L"test_hero_front_cape.bmp",
-				DATA_DIR L"test_hero_front_torso.bmp",
-				DATA_DIR L"test_hero_back_head.bmp",
-				DATA_DIR L"test_hero_back_cape.bmp",
-				DATA_DIR L"test_hero_back_torso.bmp",
-				DATA_DIR L"test_hero_shadow.bmp",
-				DATA_DIR L"test_background.bmp"
-			};
-
 		FOR_ELEMS(bmp, state->bmps)
 		{
 			PlatformFileData file_data;
-			if (!PlatformReadFileData(&file_data, bmp_file_paths[bmp_index]))
+			if (!PlatformReadFileData(&file_data, state->BMP_FILE_PATHS[bmp_index]))
 			{
 				ASSERT(false);
 				return PlatformUpdateExitCode::abort;
@@ -759,11 +738,11 @@ PlatformUpdate_t(PlatformUpdate)
 	);
 
 	{
-		vi2 hero_screen_coords = vxx(((state->hero_chunk->coords - state->camera_coords) * METERS_PER_CHUNK + state->hero_rel_pos - state->camera_rel_pos) * PIXELS_PER_METER - state->bmp.hero[0].torso.dims * vf2 { 0.5f, 0.225f });
+		vi2 hero_screen_coords = vxx(((state->hero_chunk->coords - state->camera_coords) * METERS_PER_CHUNK + state->hero_rel_pos - state->camera_rel_pos) * PIXELS_PER_METER - state->bmp.hero_torso[0].dims * vf2 { 0.5f, 0.225f });
 		draw_bmp(platform_framebuffer, &state->bmp.hero_shadow, hero_screen_coords);
-		draw_bmp(platform_framebuffer, &state->bmp.hero[static_cast<i32>(state->hero_direction)].torso, hero_screen_coords);
-		draw_bmp(platform_framebuffer, &state->bmp.hero[static_cast<i32>(state->hero_direction)].cape , hero_screen_coords);
-		draw_bmp(platform_framebuffer, &state->bmp.hero[static_cast<i32>(state->hero_direction)].head , hero_screen_coords);
+		draw_bmp(platform_framebuffer, &state->bmp.hero_torso[static_cast<i32>(state->hero_direction)], hero_screen_coords);
+		draw_bmp(platform_framebuffer, &state->bmp.hero_cape [static_cast<i32>(state->hero_direction)], hero_screen_coords);
+		draw_bmp(platform_framebuffer, &state->bmp.hero_head [static_cast<i32>(state->hero_direction)], hero_screen_coords);
 	}
 
 	draw_circle
@@ -775,9 +754,9 @@ PlatformUpdate_t(PlatformUpdate)
 	);
 
 	{
-		vi2 pet_screen_coords = vxx(((state->pet_chunk->coords - state->camera_coords) * METERS_PER_CHUNK + state->pet_rel_pos - state->camera_rel_pos) * PIXELS_PER_METER - state->bmp.hero[0].torso.dims * vf2 { 0.5f, 0.225f });
+		vi2 pet_screen_coords = vxx(((state->pet_chunk->coords - state->camera_coords) * METERS_PER_CHUNK + state->pet_rel_pos - state->camera_rel_pos) * PIXELS_PER_METER - state->bmp.hero_torso[0].dims * vf2 { 0.5f, 0.225f });
 		draw_bmp(platform_framebuffer, &state->bmp.hero_shadow, pet_screen_coords);
-		draw_bmp(platform_framebuffer, &state->bmp.hero[static_cast<i32>(state->pet_direction)].head, vxx(pet_screen_coords + vf2 { 0.0f, -0.4f * (1.0f - cosf(state->pet_hover_t * TAU)) / 2.0f } * PIXELS_PER_METER));
+		draw_bmp(platform_framebuffer, &state->bmp.hero_head[static_cast<i32>(state->pet_direction)], vxx(pet_screen_coords + vf2 { 0.0f, -0.4f * (1.0f - cosf(state->pet_hover_t * TAU)) / 2.0f } * PIXELS_PER_METER));
 	}
 
 	#if DEBUG_AUDIO
