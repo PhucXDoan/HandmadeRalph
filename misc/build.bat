@@ -16,13 +16,12 @@ pushd W:\build\
 	) else (
 		echo Debug build
 
+		del W:\src\meta\ /Q
 		cl /nologo /DDATA_DIR="\"W:/data/\"" /DEXE_DIR="\"W:/build/\"" /DSRC_DIR="\"W:/src/\"" /std:c++20 /Od /Oi /DDEBUG=1 /Z7 /MTd /GR- /EHsc /EHa- /WX %DEBUG_WARNINGS% /permissive-                      W:\src\metaprogram.cpp         /link                                             /debug:FULL /opt:ref /incremental:no
 		if !ERRORLEVEL! neq 0 (
 			echo Metaprogram compilation failed.
 			goto ABORT
 		)
-
-		goto ABORT
 
 		metaprogram.exe
 		if !ERRORLEVEL! neq 0 (

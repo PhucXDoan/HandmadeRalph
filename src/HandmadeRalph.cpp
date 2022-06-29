@@ -54,11 +54,11 @@ struct State
 	{
 		struct
 		{
-			BMP hero_head  [4]; // @META@ test_hero_left_head.bmp , test_hero_right_head.bmp , test_hero_front_head.bmp , test_hero_back_head.bmp
-			BMP hero_cape  [4]; // @META@ test_hero_left_cape.bmp , test_hero_right_cape.bmp , test_hero_front_cape.bmp , test_hero_back_cape.bmp
-			BMP hero_torso [4]; // @META@ test_hero_left_torso.bmp, test_hero_right_torso.bmp, test_hero_front_torso.bmp, test_hero_back_torso.bmp
-			BMP hero_shadow;    // @META@ test_hero_shadow.bmp
-			BMP background;     // @META@ test_background.bmp
+			BMP hero_head  [4]; // @META@ hero_left_head.bmp , hero_right_head.bmp , hero_front_head.bmp , hero_back_head.bmp
+			BMP hero_cape  [4]; // @META@ hero_left_cape.bmp , hero_right_cape.bmp , hero_front_cape.bmp , hero_back_cape.bmp
+			BMP hero_torso [4]; // @META@ hero_left_torso.bmp, hero_right_torso.bmp, hero_front_torso.bmp, hero_back_torso.bmp
+			BMP hero_shadow;    // @META@ hero_shadow.bmp
+			BMP background;     // @META@ background.bmp
 		}   bmp;
 		BMP bmps[sizeof(bmp) / sizeof(BMP)];
 	};

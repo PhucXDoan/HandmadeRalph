@@ -679,3 +679,12 @@ struct StringView
 internal constexpr bool32 operator==(const StringView& a, const StringView& b) { return a.size == b.size && memcmp(a.data, b.data, static_cast<size_t>(a.size)) == 0; }
 internal constexpr bool32 operator!=(const StringView& a, const StringView& b) { return !(a == b); }
 
+internal constexpr StringView trunc(const StringView& string, i32 maximum_length)
+{
+	return { .size = min(string.size, maximum_length), .data = string.data };
+}
+
+internal constexpr bool32 starts_with(const StringView& string, const StringView& prefix)
+{
+	return trunc(string, prefix.size) == prefix;
+}

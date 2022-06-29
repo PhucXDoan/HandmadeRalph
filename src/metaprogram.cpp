@@ -14,12 +14,12 @@ do\
 	}\
 }\
 while (false)
-#define PASS_STRING(STRING) (STRING).size, (STRING).data
+#define PASS_STR(STRING)  (STRING).size, (STRING).data
 #define META_TAG "@META@"
 
 enum struct TokenKind : u8
 {
-	nul,
+	null,
 
 	// @NOTE@ ASCII characters 0-127.
 
@@ -48,6 +48,7 @@ struct TokenBufferNode
 
 struct Tokenizer
 {
+	i32              curr_token_index;
 	TokenBufferNode* curr_token_buffer_node;
 	i32              file_size; // @NOTICE@ Only handles files below 2.14GB. If each line of code averages at 256 characters, this would be a concern if there were about 8,388,608 LOC in processed file.
 	char*            file_data;
@@ -57,8 +58,9 @@ internal Tokenizer init_tokenizer(strlit file_path)
 {
 	Tokenizer tokenizer = {};
 
-	FILE* file;
+	FILE* file = 0;
 	ASSERT(fopen_s(&file, file_path, "rb") != EINVAL); // @TODO@ Handle error.
+	ASSERT(file);
 	DEFER { fclose(file); };
 
 	fseek(file, 0, SEEK_END);
@@ -145,10 +147,18 @@ internal Tokenizer init_tokenizer(strlit file_path)
 
 						if (curr_read[0] == '#' && can_be_preprocessor)
 						{
-							token.kind = TokenKind::preprocessor;
+							token.kind          = TokenKind::preprocessor;
+							token.string.data += 1;
+							curr_read         += 1;
 
 							bool32 escaped = false;
-							while (curr_read + token.string.size < read_eof && IMPLIES(curr_read[token.string.size] == '\r' || curr_read[token.string.size] == '\n', escaped))
+							while
+							(
+								curr_read + token.string.size < read_eof
+								&& IMPLIES(curr_read[token.string.size] == '\r' || curr_read[token.string.size] == '\n', escaped)
+								&& IMPLIES(curr_read + token.string.size + 1 < read_eof, !(curr_read[token.string.size] == '/' && curr_read[token.string.size + 1] == '/'))
+								&& IMPLIES(curr_read + token.string.size + 1 < read_eof, !(curr_read[token.string.size] == '/' && curr_read[token.string.size + 1] == '*'))
+							)
 							{
 								if (curr_read[token.string.size] == '\\')
 								{
@@ -249,7 +259,7 @@ internal Tokenizer init_tokenizer(strlit file_path)
 				} break;
 			}
 
-			if (token.kind != TokenKind::nul)
+			if (token.kind != TokenKind::null)
 			{
 				if (!IN_RANGE(curr_node->count, 0, ARRAY_CAPACITY(curr_node->buffer)))
 				{
@@ -272,6 +282,7 @@ internal void deinit_tokenizer(Tokenizer* tokenizer)
 	free(tokenizer->file_data);
 
 	TokenBufferNode* node = tokenizer->curr_token_buffer_node;
+	ASSERT(node);
 	while (node && node->prev)
 	{
 		node = node->prev;
@@ -284,26 +295,274 @@ internal void deinit_tokenizer(Tokenizer* tokenizer)
 	}
 }
 
-int main()
+internal Token shift_tokenizer(Tokenizer* tokenizer, i32 offset)
 {
-	Tokenizer tokenizer = init_tokenizer(SRC_DIR "HandmadeRalph.cpp");
-	DEFER { deinit_tokenizer(&tokenizer); };
+	ASSERT(tokenizer->curr_token_buffer_node);
+	ASSERT(IFF(tokenizer->curr_token_buffer_node->count == ARRAY_CAPACITY(tokenizer->curr_token_buffer_node->buffer), tokenizer->curr_token_buffer_node->next));
 
-	#if 0
-	FOR_NODES(node, tokenizer.curr_token_buffer_node)
+	i32 steps = offset;
+	while (true)
 	{
-		FOR_ELEMS(token, node->buffer, node->count)
+		if (tokenizer->curr_token_index < 0)
 		{
-			printf("%d : `%.*s`\n", static_cast<i32>(token->kind), PASS_STRING(token->string));
+			if (tokenizer->curr_token_buffer_node->prev)
+			{
+				tokenizer->curr_token_buffer_node  = tokenizer->curr_token_buffer_node->prev;
+				tokenizer->curr_token_index = tokenizer->curr_token_buffer_node->count - 1;
+			}
+			else
+			{
+				tokenizer->curr_token_index = 0;
+				return {};
+			}
+		}
+		else if (tokenizer->curr_token_index >= tokenizer->curr_token_buffer_node->count)
+		{
+			if (tokenizer->curr_token_buffer_node->next)
+			{
+				tokenizer->curr_token_buffer_node  = tokenizer->curr_token_buffer_node->next;
+				tokenizer->curr_token_index = 0;
+			}
+			else
+			{
+				tokenizer->curr_token_index = tokenizer->curr_token_buffer_node->count;
+				return {};
+			}
+		}
+
+		ASSERT(IN_RANGE(tokenizer->curr_token_index, 0, tokenizer->curr_token_buffer_node->count));
+
+		if (steps)
+		{
+			tokenizer->curr_token_index += sign(offset);
+			steps -= sign(offset);
+		}
+		else
+		{
+			return tokenizer->curr_token_buffer_node->buffer[tokenizer->curr_token_index];
 		}
 	}
-	#else
-	FOR_ELEMS(token, tokenizer.curr_token_buffer_node->buffer, 256)
-	{
-		printf("%d : \"%.*s\"\n", static_cast<i32>(token->kind), PASS_STRING(token->string));
-	}
-	#endif
+}
 
-	DEBUG_STDOUT_HALT();
+int main()
+{
+	Tokenizer main_tokenizer = init_tokenizer(SRC_DIR "HandmadeRalph.cpp");
+	DEFER { deinit_tokenizer(&main_tokenizer); };
+
+	while (true)
+	{
+		Token curr_main_token = shift_tokenizer(&main_tokenizer, 0);
+
+		if (curr_main_token.kind == TokenKind::null)
+		{
+			break;
+		}
+		else if (curr_main_token.kind == TokenKind::meta)
+		{ // @TODO@ This only handles a specific usage of the metaprogram.
+			Tokenizer asset_tokenizer = main_tokenizer;
+			Token     asset_token;
+
+			StringView asset_array_name;
+			while (true)
+			{
+				asset_token = shift_tokenizer(&asset_tokenizer, 1);
+				ASSERT(asset_token.kind != TokenKind::null);
+
+				if (asset_token.kind == static_cast<TokenKind>('}'))
+				{
+					asset_token = shift_tokenizer(&asset_tokenizer, 1);
+					ASSERT(asset_token.kind == TokenKind::identifier); // @NOTE@ Expects a name for the containing struct.
+
+					asset_token = shift_tokenizer(&asset_tokenizer, 1);
+					ASSERT(asset_token.kind == static_cast<TokenKind>(';'));
+
+					asset_token = shift_tokenizer(&asset_tokenizer, 1);
+					ASSERT(asset_token.kind == TokenKind::identifier); // @NOTE@ Expects the underlying type of the asset.
+
+					asset_token = shift_tokenizer(&asset_tokenizer, 1);
+					ASSERT(asset_token.kind == TokenKind::identifier); // @NOTE@ Expects the name of the asset array.
+
+					asset_array_name = asset_token.string;
+					break;
+				}
+			}
+
+			do
+			{
+				asset_token = shift_tokenizer(&asset_tokenizer, 1);
+				ASSERT(asset_token.kind != TokenKind::null);
+			}
+			while (asset_token.kind != static_cast<TokenKind>('}'));
+
+			asset_token = shift_tokenizer(&asset_tokenizer, 1);
+			ASSERT(asset_token.kind == static_cast<TokenKind>(';'));
+
+			constexpr StringView PREPROCESSOR_INCLUDE_PREFIX = STRING_VIEW_OF("include ");
+			Token preprocessor_include = shift_tokenizer(&asset_tokenizer, 1);
+			ASSERT(preprocessor_include.kind == TokenKind::preprocessor);
+			ASSERT(starts_with(preprocessor_include.string, PREPROCESSOR_INCLUDE_PREFIX));
+
+			StringView output_asset_file_path = { .size = 3, .data = preprocessor_include.string.data + PREPROCESSOR_INCLUDE_PREFIX.size + 1 };
+			while
+			(
+				output_asset_file_path.data + output_asset_file_path.size < preprocessor_include.string.data + preprocessor_include.string.size
+				&& output_asset_file_path.data[output_asset_file_path.size] != '"'
+				&& output_asset_file_path.data[output_asset_file_path.size] != '>'
+			)
+			{
+				output_asset_file_path.size += 1;
+			}
+
+			ASSERT(starts_with(output_asset_file_path, STRING_VIEW_OF("meta/")));
+
+			main_tokenizer = asset_tokenizer;
+
+			FILE* output_asset_file = 0;
+			{
+				char buffer[256];
+				i32 result = sprintf_s(buffer, SRC_DIR "%.*s", PASS_STR(output_asset_file_path));
+				ASSERT(result == static_cast<i32>(sizeof(SRC_DIR) - 1 + output_asset_file_path.size));
+
+				result = fopen_s(&output_asset_file, buffer, "wb");
+				ASSERT(result != EINVAL);
+				ASSERT(output_asset_file);
+			}
+			DEFER { fclose(output_asset_file); };
+
+			fprintf(output_asset_file, "static inline constexpr wstrlit ");
+			{
+				char   buffer[256];
+				i32    count   = 0;
+				bool32 writing = false;
+				FOR_ELEMS(c, output_asset_file_path.data, output_asset_file_path.size)
+				{
+					if (writing)
+					{
+						if (*c == '.')
+						{
+							break;
+						}
+						else
+						{
+							buffer[count]  = uppercase(*c);
+							count         += 1;
+						}
+					}
+					else if (*c == '/')
+					{
+						writing = true;
+					}
+				}
+				ASSERT(writing);
+				fprintf(output_asset_file, "%.*s", count, buffer);
+			}
+			fprintf(output_asset_file, "[] =\n\t{\n");
+
+			do
+			{
+				asset_token = shift_tokenizer(&asset_tokenizer, -1);
+				ASSERT(asset_token.kind != TokenKind::null);
+			}
+			while (!(asset_token.kind == TokenKind::identifier && asset_token.string == STRING_VIEW_OF("struct")));
+
+			asset_token = shift_tokenizer(&asset_tokenizer, 1);
+			ASSERT(asset_token.kind == static_cast<TokenKind>('{'));
+
+			while (true)
+			{
+				asset_token = shift_tokenizer(&asset_tokenizer, 1);
+				ASSERT(asset_token.kind != TokenKind::null);
+
+				if (asset_token.kind == static_cast<TokenKind>('}'))
+				{
+					break;
+				}
+				else
+				{
+					ASSERT(asset_token.kind == TokenKind::identifier); // @NOTE@ Expects the type of the asset.
+
+					asset_token = shift_tokenizer(&asset_tokenizer, 1);
+					ASSERT(asset_token.kind == TokenKind::identifier); // @NOTE@ Expects the name of the asset.
+
+					asset_token = shift_tokenizer(&asset_tokenizer, 1);
+					ASSERT(asset_token.kind != TokenKind::null || asset_token.kind == static_cast<TokenKind>(';') || asset_token.kind == static_cast<TokenKind>('['));
+
+					i32 asset_count = 1;
+					if (asset_token.kind == static_cast<TokenKind>('['))
+					{
+						asset_token = shift_tokenizer(&asset_tokenizer, 1);
+						ASSERT(asset_token.kind == TokenKind::number); // @TODO@ Other expressions could be the size.
+
+						{
+							i32 result = _snscanf_s(asset_token.string.data, static_cast<size_t>(asset_token.string.size), "%d", &asset_count);
+							ASSERT(result == 1);
+						}
+
+						asset_token = shift_tokenizer(&asset_tokenizer, 1);
+						ASSERT(asset_token.kind == static_cast<TokenKind>(']'));
+
+						asset_token = shift_tokenizer(&asset_tokenizer, 1);
+						ASSERT(asset_token.kind == static_cast<TokenKind>(';'));
+					}
+
+					asset_token = shift_tokenizer(&asset_tokenizer, 1);
+					ASSERT(asset_token.kind == TokenKind::meta);
+
+					fprintf(output_asset_file, "\t\t");
+
+					i32 asset_file_path_start = 0;
+					while (true)
+					{
+						while (asset_file_path_start < asset_token.string.size && asset_token.string.data[asset_file_path_start] == ' ')
+						{
+							asset_file_path_start += 1;
+						}
+
+						if (asset_file_path_start < asset_token.string.size)
+						{
+
+							i32 asset_file_path_length = 0;
+							while (asset_file_path_start + asset_file_path_length < asset_token.string.size && asset_token.string.data[asset_file_path_start + asset_file_path_length] != ',')
+							{
+								asset_file_path_length += 1;
+							}
+
+							while (asset_file_path_length > 0 && asset_token.string.data[asset_file_path_start + asset_file_path_length - 1] == ' ')
+							{
+								asset_file_path_length -= 1;
+							}
+
+							ASSERT(asset_file_path_length >= 1);
+
+							fprintf(output_asset_file, "DATA_DIR L\"%.*s\",", asset_file_path_length, asset_token.string.data + asset_file_path_start);
+
+							asset_count -= 1;
+							if (asset_count)
+							{
+								fprintf(output_asset_file, " ");
+							}
+
+							asset_file_path_start += asset_file_path_length;
+							while (asset_file_path_start < asset_token.string.size && asset_token.string.data[asset_file_path_start] != ',')
+							{
+								asset_file_path_start += 1;
+							}
+							asset_file_path_start += 1;
+						}
+						else
+						{
+							break;
+						}
+					}
+					fprintf(output_asset_file, "\n");
+				}
+			}
+
+			fprintf(output_asset_file, "\t};\n");
+		}
+
+		shift_tokenizer(&main_tokenizer, 1);
+	}
+
 	return 0;
 }
