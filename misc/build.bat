@@ -1,49 +1,41 @@
 @echo off
 setlocal ENABLEDELAYEDEXPANSION
 
-set DEBUG=1
-set WARNINGS=/W4 /Wall /wd4201 /wd5219 /wd4668 /wd5045 /wd4711
-set DEBUG_WARNINGS=%WARNINGS% /wd4505 /wd4100 /wd4101 /wd4514 /wd4189 /wd4191 /wd4820 /wd4710
-set LIBRARIES=user32.lib gdi32.lib winmm.lib dxgi.lib
+set WARNINGS=/W4 /Wall /wd4201 /wd5219 /wd4668 /wd5045 /wd4711 /wd4505 /wd4100 /wd4101 /wd4514 /wd4189 /wd4191 /wd4820 /wd4710
+set COMMON_COMPILER_FLAGS=/nologo /GR- /EHsc /EHa- /permissive- /std:c++20 /Od /Oi /Z7 /MTd /DDATA_DIR="\"W:/data/\"" /DEXE_DIR="\"W:/build/\"" /DSRC_DIR="\"W:/src/\"" /DDEBUG=1
+set COMMON_LINKER_FLAGS=/opt:ref /incremental:no /debug:full
 
 IF NOT EXIST W:\build\ (
 	mkdir W:\build\
 )
 
 pushd W:\build\
-	if %DEBUG% equ 0 (
-		echo Release build
-	) else (
-		echo Debug build
-
-		del W:\src\meta\ /Q
-		cl /nologo /DDATA_DIR="\"W:/data/\"" /DEXE_DIR="\"W:/build/\"" /DSRC_DIR="\"W:/src/\"" /std:c++20 /Od /Oi /DDEBUG=1 /Z7 /MTd /GR- /EHsc /EHa- /WX %DEBUG_WARNINGS% /permissive-                      W:\src\metaprogram.cpp         /link                                             /debug:FULL /opt:ref /incremental:no
-		if !ERRORLEVEL! neq 0 (
-			echo Metaprogram compilation failed.
-			goto ABORT
-		)
-
-		metaprogram.exe
-		if !ERRORLEVEL! neq 0 (
-			echo Metaprogram execution failed.
-			goto ABORT
-		)
-
-		del *.pdb > NUL 2> NUL
-		echo 0 > LOCK.temp
-		cl /nologo /DDATA_DIR="\"W:/data/\"" /DEXE_DIR="\"W:/build/\"" /DSRC_DIR="\"W:/src/\"" /std:c++20 /Od /Oi /DDEBUG=1 /Z7 /MTd /GR- /EHsc /EHa-     %DEBUG_WARNINGS% /permissive- /LD                  W:\src\HandmadeRalph.cpp       /link /PDB:HandmadeRalph_%RANDOM%.pdb %LIBRARIES% /debug:FULL /opt:ref /incremental:no /export:PlatformUpdate /export:PlatformSound
-		del LOCK.temp
-
-		copy NUL HandmadeRalph.exe > NUL 2>&1
-		if !ERRORLEVEL! neq 0 (
-			goto ABORT
-		)
-
-		cl /nologo /DDATA_DIR="\"W:/data/\"" /DEXE_DIR="\"W:/build/\"" /DSRC_DIR="\"W:/src/\"" /std:c++20 /Od /Oi /DDEBUG=1 /Z7 /MTd /GR- /EHsc /EHa-     %DEBUG_WARNINGS% /permissive- /FeHandmadeRalph.exe W:\src\HandmadeRalph_win32.cpp /link                                 %LIBRARIES% /debug:FULL /opt:ref /incremental:no /subsystem:windows
-
-		:ABORT
-		del *.obj *.lib *.exp > NUL 2> NUL
+	del W:\src\meta\ /Q
+	cl %COMMON_COMPILER_FLAGS% /WX                  W:\src\metaprogram.cpp         /link %COMMON_LINKER_FLAGS%
+	if !ERRORLEVEL! neq 0 (
+		echo Metaprogram compilation failed.
+		goto ABORT
 	)
+
+	metaprogram.exe
+	if !ERRORLEVEL! neq 0 (
+		echo Metaprogram execution failed.
+		goto ABORT
+	)
+
+	del *.pdb > NUL 2> NUL
+	echo 0 > LOCK.temp
+	cl %COMMON_COMPILER_FLAGS%  /LD                  W:\src\HandmadeRalph.cpp      /link %COMMON_LINKER_FLAGS% /PDB:HandmadeRalph_%RANDOM%.pdb /export:PlatformUpdate /export:PlatformSound
+	del LOCK.temp
+
+	copy NUL HandmadeRalph.exe > NUL 2>&1
+	if !ERRORLEVEL! neq 0 (
+		goto ABORT
+	)
+	cl %COMMON_COMPILER_FLAGS% /FeHandmadeRalph.exe W:\src\HandmadeRalph_win32.cpp /link %COMMON_LINKER_FLAGS% /subsystem:windows user32.lib gdi32.lib winmm.lib dxgi.lib
+
+	:ABORT
+	del *.obj *.lib *.exp > NUL 2> NUL
 popd
 
 REM C4201       : "nonstandard extension used : nameless struct/union"
