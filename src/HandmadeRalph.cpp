@@ -36,12 +36,23 @@ struct BMP
 	RGBA* rgba;
 };
 
-enum struct Cardinal : u8
+constexpr vf2 CARDINAL_VF2[4] = { { -1.0f, 0.0f }, { 1.0f, 0.0f }, { 0.0f, -1.0f, }, { 0.0f, 1.0f } };
+constexpr vi2 CARDINAL_VI2[4] = { { -1   , 0    }, { 1   , 0    }, { 0   , -1   , }, { 0   , 1    } };
+enum Cardinal : u8
 {
-	left,
-	right,
-	down,
-	up
+	Cardinal_left,
+	Cardinal_right,
+	Cardinal_down,
+	Cardinal_up
+};
+
+struct Rock
+{
+	i32    bmp_index;
+	Chunk* chunk;
+	vf2    rel_pos;
+	vf2    vel;
+	f32    existence_t;
 };
 
 struct State
@@ -54,11 +65,12 @@ struct State
 	{
 		struct
 		{
-			BMP hero_head  [4]; // @META@ hero_left_head.bmp , hero_right_head.bmp , hero_front_head.bmp , hero_back_head.bmp
-			BMP hero_cape  [4]; // @META@ hero_left_cape.bmp , hero_right_cape.bmp , hero_front_cape.bmp , hero_back_cape.bmp
-			BMP hero_torso [4]; // @META@ hero_left_torso.bmp, hero_right_torso.bmp, hero_front_torso.bmp, hero_back_torso.bmp
+			BMP hero_heads [4]; // @META@ hero_left_head.bmp , hero_right_head.bmp , hero_front_head.bmp , hero_back_head.bmp
+			BMP hero_capes [4]; // @META@ hero_left_cape.bmp , hero_right_cape.bmp , hero_front_cape.bmp , hero_back_cape.bmp
+			BMP hero_torsos[4]; // @META@ hero_left_torso.bmp, hero_right_torso.bmp, hero_front_torso.bmp, hero_back_torso.bmp
 			BMP hero_shadow;    // @META@ hero_shadow.bmp
 			BMP background;     // @META@ background.bmp
+			BMP rocks      [4]; // @META@ rock00.bmp         , rock01.bmp          , rock02.bmp          , rock03.bmp
 		}   bmp;
 		BMP bmps[sizeof(bmp) / sizeof(BMP)];
 	};
@@ -70,13 +82,16 @@ struct State
 	Chunk*     hero_chunk;
 	vf2        hero_rel_pos;
 	vf2        hero_vel;
-	Cardinal   hero_direction;
+	Cardinal   hero_cardinal;
 
 	f32        pet_hover_t;
 	Chunk*     pet_chunk;
 	vf2        pet_rel_pos;
 	vf2        pet_vel;
-	Cardinal   pet_direction;
+	Cardinal   pet_cardinal;
+
+	Rock       rock_buffer[16];
+	i32        rock_count;
 
 	vi2        camera_coords;
 	vf2        camera_rel_pos;
@@ -110,39 +125,6 @@ internal void draw_rect(PlatformFramebuffer* platform_framebuffer, vi2 bottom_le
 		}
 	}
 }
-
-#if 0
-// @TODO@ Subpixel.
-internal void draw_bmp(PlatformFramebuffer* platform_framebuffer, BMP* bmp, vf2 bottom_left, vf2 dims)
-{
-	vi2 pixel_coords = vxx(bottom_left.x, platform_framebuffer->dims.y - bottom_left.y); // @TODO@ Round.
-	vi2 pixel_dims   = vxx(dims); // @TODO@ Round.
-
-	FOR_RANGE(y, max(pixel_coords.y - pixel_dims.y, 0), min(pixel_coords.y, platform_framebuffer->dims.y))
-	{
-		FOR_RANGE(x, max(pixel_coords.x, 0), min(pixel_coords.x + pixel_dims.x, platform_framebuffer->dims.x))
-		{
-			aliasing dst = platform_framebuffer->pixels[y * platform_framebuffer->dims.x + x];
-			vi2 sample_coords = vxx(vxx(x - pixel_coords.x, pixel_coords.y - 1 - y) / pixel_dims * bmp->dims); // @TODO@ Round.
-			vf4 top           = vf4_from_rgba(bmp->rgba[sample_coords.y * bmp->dims.x + sample_coords.x]);
-
-			if (top.w == 1.0f)
-			{
-				dst = pack_argb(top);
-			}
-			else
-			{
-				dst = pack_argb(lerp(vf3_from_argb(dst), top.xyz, top.w));
-			}
-		}
-	}
-}
-
-internal void draw_bmp(PlatformFramebuffer* platform_framebuffer, BMP* bmp, vf2 bottom_left, f32 scalar, vf2 center)
-{
-	draw_bmp(platform_framebuffer, bmp, bottom_left - bmp->dims * scalar * center, bmp->dims * scalar);
-}
-#endif
 
 internal void draw_bmp(PlatformFramebuffer* platform_framebuffer, BMP* bmp, vi2 bottom_left)
 {
@@ -324,6 +306,7 @@ internal CollisionResult collide_against_rounded_rectangle(vf2 displacement, vf2
 enum struct CollisionShapeType : u8
 {
 	null,
+	point,
 	circle,
 	rounded_rectangle
 };
@@ -352,6 +335,21 @@ internal CollisionResult collide_shapes(vf2 displacement, CollisionShape a, vf2 
 	{
 		switch (a.type)
 		{
+			case CollisionShapeType::point: switch (b.type)
+			{
+				case CollisionShapeType::point: return
+					{};
+
+				case CollisionShapeType::circle: return
+					collide_against_circle(displacement, pos, b.circle.radius);
+
+				case CollisionShapeType::rounded_rectangle: return
+					collide_against_rounded_rectangle(displacement, pos, b.rounded_rectangle.dims, b.rounded_rectangle.padding);
+
+				default: ASSERT(false);
+					return {};
+			}
+
 			case CollisionShapeType::circle: switch (b.type)
 			{
 				case CollisionShapeType::circle: return
@@ -560,15 +558,12 @@ PlatformUpdate_t(PlatformUpdate)
 		state->pet_rel_pos = { 7.0f, 9.0f };
 	}
 
-	//
-	// (Update) Hero.
-	//
-
 	enum struct MoveTag : u8
 	{
 		null,
 		hero,
-		pet
+		pet,
+		rock
 	};
 
 	struct Move
@@ -602,12 +597,38 @@ PlatformUpdate_t(PlatformUpdate)
 			{
 				CollisionResult result = {};
 
-				// @TODO@ This checks chunks in a 3x3 adjacenct fashion. Could be better.
-				FOR_RANGE(i, 9)
+				if (move->tag != MoveTag::rock)
 				{
-					Chunk* chunk = get_chunk(state, move->chunk->coords + vi2 { i % 3 - 1, i / 3 - 1 });
+					// @TODO@ This checks chunks in a 3x3 adjacenct fashion. Could be better.
+					FOR_RANGE(i, 9)
+					{
+						Chunk* chunk = get_chunk(state, move->chunk->coords + vi2 { i % 3 - 1, i / 3 - 1 });
 
-					FOR_ELEMS(wall, move->chunk->wall_buffer, move->chunk->wall_count)
+						FOR_ELEMS(wall, move->chunk->wall_buffer, move->chunk->wall_count)
+						{
+							result =
+								prioritize_collision_results
+								(
+									result,
+									collide_shapes
+									(
+										displacement,
+										move->shape,
+										(chunk->coords - move->chunk->coords) * METERS_PER_CHUNK + wall->rel_pos - move->rel_pos,
+										{
+											.type              = CollisionShapeType::rounded_rectangle,
+											.rounded_rectangle =
+												{
+													.dims    = wall->dims,
+													.padding = 0.0f // @TODO@ Rectangle shape type.
+												}
+										}
+									)
+								);
+						}
+					}
+
+					if (move->tag != MoveTag::hero)
 					{
 						result =
 							prioritize_collision_results
@@ -617,50 +638,27 @@ PlatformUpdate_t(PlatformUpdate)
 								(
 									displacement,
 									move->shape,
-									(chunk->coords - move->chunk->coords) * METERS_PER_CHUNK + wall->rel_pos - move->rel_pos,
-									{
-										.type              = CollisionShapeType::rounded_rectangle,
-										.rounded_rectangle =
-											{
-												.dims    = wall->dims,
-												.padding = 0.0f // @TODO@ Rectangle shape type.
-											}
-									}
+									(state->hero_chunk->coords - move->chunk->coords) * METERS_PER_CHUNK + state->hero_rel_pos - move->rel_pos,
+									HERO_COLLISION_SHAPE
 								)
 							);
 					}
-				}
 
-				if (move->tag != MoveTag::hero)
-				{
-					result =
-						prioritize_collision_results
-						(
-							result,
-							collide_shapes
+					if (move->tag != MoveTag::pet)
+					{
+						result =
+							prioritize_collision_results
 							(
-								displacement,
-								move->shape,
-								(state->hero_chunk->coords - move->chunk->coords) * METERS_PER_CHUNK + state->hero_rel_pos - move->rel_pos,
-								HERO_COLLISION_SHAPE
-							)
-						);
-				}
-
-				if (move->tag != MoveTag::pet)
-				{
-					result =
-						prioritize_collision_results
-						(
-							result,
-							collide_shapes
-							(
-								displacement,
-								move->shape,
-								(state->pet_chunk->coords - move->chunk->coords) * METERS_PER_CHUNK + state->pet_rel_pos - move->rel_pos,
-								PET_COLLISION_SHAPE
-							)
-						);
+								result,
+								collide_shapes
+								(
+									displacement,
+									move->shape,
+									(state->pet_chunk->coords - move->chunk->coords) * METERS_PER_CHUNK + state->pet_rel_pos - move->rel_pos,
+									PET_COLLISION_SHAPE
+								)
+							);
+					}
 				}
 
 				move->rel_pos +=
@@ -689,14 +687,18 @@ PlatformUpdate_t(PlatformUpdate)
 			}
 		};
 
+	//
+	// Update Hero.
+	//
+
 	{
 		vf2 target_hero_vel = vxx(WASD_DOWN());
 		if (+target_hero_vel)
 		{
-			if      (target_hero_vel.x < 0.0f) { state->hero_direction = Cardinal::left;  }
-			else if (target_hero_vel.x > 0.0f) { state->hero_direction = Cardinal::right; }
-			else if (target_hero_vel.y < 0.0f) { state->hero_direction = Cardinal::down;  }
-			else if (target_hero_vel.y > 0.0f) { state->hero_direction = Cardinal::up;    }
+			if      (target_hero_vel.x < 0.0f) { state->hero_cardinal = Cardinal_left;  }
+			else if (target_hero_vel.x > 0.0f) { state->hero_cardinal = Cardinal_right; }
+			else if (target_hero_vel.y < 0.0f) { state->hero_cardinal = Cardinal_down;  }
+			else if (target_hero_vel.y > 0.0f) { state->hero_cardinal = Cardinal_up;    }
 
 			target_hero_vel = normalize(target_hero_vel) * 1.78816f;
 
@@ -723,7 +725,7 @@ PlatformUpdate_t(PlatformUpdate)
 	}
 
 	//
-	// (Update) Pet.
+	// Update Pet.
 	//
 
 	state->pet_hover_t = mod(state->pet_hover_t + platform_delta_time / 4.0f, 1.0f);
@@ -742,10 +744,10 @@ PlatformUpdate_t(PlatformUpdate)
 					target_pet_vel = ray_to_hero * 2.0f;
 				}
 
-				if      (ray_to_hero.x < -1.0f / SQRT2) { state->pet_direction = Cardinal::left;  }
-				else if (ray_to_hero.x >  1.0f / SQRT2) { state->pet_direction = Cardinal::right; }
-				else if (ray_to_hero.y < -1.0f / SQRT2) { state->pet_direction = Cardinal::down;  }
-				else if (ray_to_hero.y >  1.0f / SQRT2) { state->pet_direction = Cardinal::up;    }
+				if      (ray_to_hero.x < -1.0f / SQRT2) { state->pet_cardinal = Cardinal_left;  }
+				else if (ray_to_hero.x >  1.0f / SQRT2) { state->pet_cardinal = Cardinal_right; }
+				else if (ray_to_hero.y < -1.0f / SQRT2) { state->pet_cardinal = Cardinal_down;  }
+				else if (ray_to_hero.y >  1.0f / SQRT2) { state->pet_cardinal = Cardinal_up;    }
 			}
 
 			state->pet_vel = dampen(state->pet_vel, target_pet_vel, 0.1f, platform_delta_time);
@@ -766,21 +768,76 @@ PlatformUpdate_t(PlatformUpdate)
 	}
 
 	//
-	// (Update) camera.
+	// Update rocks.
 	//
 
-	vf2 target_camera_vel = vxx(HJKL_DOWN());
-	if (+target_camera_vel)
 	{
-		target_camera_vel = normalize(target_camera_vel) * 8.0f;
+		if (BTN_PRESSES(.space))
+		{
+			ASSERT(IN_RANGE(state->rock_count, 0, ARRAY_CAPACITY(state->rock_buffer)));
+			state->rock_buffer[state->rock_count] =
+				{
+					.bmp_index   = rng(&state->seed, 0, ARRAY_CAPACITY(state->bmp.rocks)),
+					.chunk       = state->hero_chunk,
+					.rel_pos     = state->hero_rel_pos,
+					.vel         = state->hero_vel + CARDINAL_VF2[state->hero_cardinal] * 2.0f,
+					.existence_t = 1.0f
+				};
+			state->rock_count += 1;
+		}
 	}
 
-	state->camera_vel      = dampen(state->camera_vel, target_camera_vel, 0.001f, platform_delta_time);
-	state->camera_rel_pos += state->camera_vel * platform_delta_time;
-	if      (state->camera_rel_pos.x <              0.0f) { state->camera_coords.x -= 1; state->camera_rel_pos.x += METERS_PER_CHUNK; }
-	else if (state->camera_rel_pos.x >= METERS_PER_CHUNK) { state->camera_coords.x += 1; state->camera_rel_pos.x -= METERS_PER_CHUNK; }
-	if      (state->camera_rel_pos.y <              0.0f) { state->camera_coords.y -= 1; state->camera_rel_pos.y += METERS_PER_CHUNK; }
-	else if (state->camera_rel_pos.y >= METERS_PER_CHUNK) { state->camera_coords.y += 1; state->camera_rel_pos.y -= METERS_PER_CHUNK; }
+	FOR_ELEMS(rock, state->rock_buffer, state->rock_count)
+	{
+		rock->existence_t -= platform_delta_time / 4.0f; // @TODO@ Update rock based on how much time left.
+		if (rock->existence_t > 0.0f)
+		{
+			Move move =
+				{
+					.tag     = MoveTag::rock,
+					.shape   = { .type = CollisionShapeType::point },
+					.chunk   = rock->chunk,
+					.rel_pos = rock->rel_pos,
+					.vel     = rock->vel,
+				};
+			process_move(&move);
+			rock->chunk   = move.chunk;
+			rock->rel_pos = move.rel_pos;
+			rock->vel     = move.vel;
+		}
+	}
+
+	for (i32 i = 0; i < state->rock_count;)
+	{
+		if (state->rock_buffer[i].existence_t <= 0.0f)
+		{
+			state->rock_count -= 1;
+			state->rock_buffer[i] = state->rock_buffer[state->rock_count];
+		}
+		else
+		{
+			i += 1;
+		}
+	}
+
+	//
+	// Update camera.
+	//
+
+	{
+		vf2 target_camera_vel = vxx(HJKL_DOWN());
+		if (+target_camera_vel)
+		{
+			target_camera_vel = normalize(target_camera_vel) * 8.0f;
+		}
+
+		state->camera_vel      = dampen(state->camera_vel, target_camera_vel, 0.001f, platform_delta_time);
+		state->camera_rel_pos += state->camera_vel * platform_delta_time;
+		if      (state->camera_rel_pos.x <              0.0f) { state->camera_coords.x -= 1; state->camera_rel_pos.x += METERS_PER_CHUNK; }
+		else if (state->camera_rel_pos.x >= METERS_PER_CHUNK) { state->camera_coords.x += 1; state->camera_rel_pos.x -= METERS_PER_CHUNK; }
+		if      (state->camera_rel_pos.y <              0.0f) { state->camera_coords.y -= 1; state->camera_rel_pos.y += METERS_PER_CHUNK; }
+		else if (state->camera_rel_pos.y >= METERS_PER_CHUNK) { state->camera_coords.y += 1; state->camera_rel_pos.y -= METERS_PER_CHUNK; }
+	}
 
 	//DEBUG_printf("(%f %f)\n", PASS_V2(state->hero_rel_pos));
 
@@ -818,11 +875,11 @@ PlatformUpdate_t(PlatformUpdate)
 	);
 
 	{
-		vi2 hero_screen_coords = vxx(((state->hero_chunk->coords - state->camera_coords) * METERS_PER_CHUNK + state->hero_rel_pos - state->camera_rel_pos) * PIXELS_PER_METER - state->bmp.hero_torso[0].dims * vf2 { 0.5f, 0.225f });
+		vi2 hero_screen_coords = vxx(((state->hero_chunk->coords - state->camera_coords) * METERS_PER_CHUNK + state->hero_rel_pos - state->camera_rel_pos) * PIXELS_PER_METER - state->bmp.hero_torsos[0].dims * vf2 { 0.5f, 0.225f });
 		draw_bmp(platform_framebuffer, &state->bmp.hero_shadow, hero_screen_coords);
-		draw_bmp(platform_framebuffer, &state->bmp.hero_torso[static_cast<i32>(state->hero_direction)], hero_screen_coords);
-		draw_bmp(platform_framebuffer, &state->bmp.hero_cape [static_cast<i32>(state->hero_direction)], hero_screen_coords);
-		draw_bmp(platform_framebuffer, &state->bmp.hero_head [static_cast<i32>(state->hero_direction)], hero_screen_coords);
+		draw_bmp(platform_framebuffer, &state->bmp.hero_torsos[state->hero_cardinal], hero_screen_coords);
+		draw_bmp(platform_framebuffer, &state->bmp.hero_capes [state->hero_cardinal], hero_screen_coords);
+		draw_bmp(platform_framebuffer, &state->bmp.hero_heads [state->hero_cardinal], hero_screen_coords);
 	}
 
 	draw_circle
@@ -834,9 +891,20 @@ PlatformUpdate_t(PlatformUpdate)
 	);
 
 	{
-		vi2 pet_screen_coords = vxx(((state->pet_chunk->coords - state->camera_coords) * METERS_PER_CHUNK + state->pet_rel_pos - state->camera_rel_pos) * PIXELS_PER_METER - state->bmp.hero_torso[0].dims * vf2 { 0.5f, 0.225f });
+		vi2 pet_screen_coords = vxx(((state->pet_chunk->coords - state->camera_coords) * METERS_PER_CHUNK + state->pet_rel_pos - state->camera_rel_pos) * PIXELS_PER_METER - state->bmp.hero_torsos[0].dims * vf2 { 0.5f, 0.225f });
 		draw_bmp(platform_framebuffer, &state->bmp.hero_shadow, pet_screen_coords);
-		draw_bmp(platform_framebuffer, &state->bmp.hero_head[static_cast<i32>(state->pet_direction)], vxx(pet_screen_coords + vf2 { 0.0f, -0.4f * (1.0f - cosf(state->pet_hover_t * TAU)) / 2.0f } * PIXELS_PER_METER));
+		draw_bmp(platform_framebuffer, &state->bmp.hero_heads[state->pet_cardinal], vxx(pet_screen_coords + vf2 { 0.0f, -0.4f * (1.0f - cosf(state->pet_hover_t * TAU)) / 2.0f } * PIXELS_PER_METER));
+	}
+
+	FOR_ELEMS(rock, state->rock_buffer, state->rock_count)
+	{
+		ASSERT(IN_RANGE(rock->bmp_index, 0, ARRAY_CAPACITY(state->bmp.rocks)));
+		draw_bmp
+		(
+			platform_framebuffer,
+			&state->bmp.rocks[rock->bmp_index],
+			vxx(((rock->chunk->coords - state->camera_coords) * METERS_PER_CHUNK + rock->rel_pos - state->camera_rel_pos) * PIXELS_PER_METER - state->bmp.rocks[rock->bmp_index].dims * vf2 { 0.5f, 0.5f })
+		);
 	}
 
 	#if DEBUG_AUDIO

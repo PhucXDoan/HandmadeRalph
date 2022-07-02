@@ -75,6 +75,7 @@ struct PlatformInput
 			u8 enter;
 			u8 shift;
 			u8 alt;
+			u8 space;
 			u8 mouse_left;
 			u8 mouse_right;
 		} button;

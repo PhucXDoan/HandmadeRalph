@@ -217,6 +217,7 @@ internal LRESULT window_procedure_callback(HWND window, UINT message, WPARAM wpa
 						case VK_RETURN : PROCESS_PLATFORM_BUTTON(.enter,       is_down); break;
 						case VK_SHIFT  : PROCESS_PLATFORM_BUTTON(.shift,       is_down); break;
 						case VK_MENU   : PROCESS_PLATFORM_BUTTON(.alt,         is_down); break;
+						case VK_SPACE  : PROCESS_PLATFORM_BUTTON(.space,       is_down); break;
 						case VK_F4:
 						{
 							if (lparam & (1 << 29))
