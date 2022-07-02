@@ -209,9 +209,9 @@ internal const CollisionResult& prioritize_collision_results(const CollisionResu
 		: b;
 }
 
-internal CollisionResult collide_against_plane(vf2 pos, vf2 displacement, vf2 plane_center, vf2 plane_normal)
+internal CollisionResult collide_against_plane(vf2 displacement, vf2 plane_center, vf2 plane_normal)
 {
-	f32 inside_amount       = dot(plane_normal, plane_center - pos);
+	f32 inside_amount       = dot(plane_normal, plane_center);
 	f32 intersection_scalar = inside_amount / dot(plane_normal, displacement);
 	if (inside_amount < 0.0f && IN_RANGE(intersection_scalar, 0.0f, 1.0f))
 	{
@@ -239,18 +239,17 @@ internal CollisionResult collide_against_plane(vf2 pos, vf2 displacement, vf2 pl
 	}
 }
 
-internal CollisionResult collide_against_line(vf2 pos, vf2 displacement, vf2 line_center, vf2 line_normal, f32 padding)
+internal CollisionResult collide_against_line(vf2 displacement, vf2 line_center, vf2 line_normal, f32 padding)
 {
-	vf2 plane_normal = line_normal * (dot(pos - line_center, line_normal) < 0.0f ? -1.0f : 1.0f);
-	return collide_against_plane(pos, displacement, line_center + plane_normal * padding, plane_normal);
+	vf2 plane_normal = line_normal * (dot(line_center, line_normal) > 0.0f ? -1.0f : 1.0f);
+	return collide_against_plane(displacement, line_center + plane_normal * padding, plane_normal);
 }
 
 // @TODO@ Bugs out on `radius == 0.0f`
-internal CollisionResult collide_against_circle(vf2 pos, vf2 displacement, vf2 center, f32 radius)
+internal CollisionResult collide_against_circle(vf2 displacement, vf2 center, f32 radius)
 {
-	vf2 rel_pos                 = pos - center;
-	f32 distance_from_center    = norm(rel_pos);
-	f32 amount_away_from_center = dot(rel_pos, displacement);
+	f32 distance_from_center    = norm(center);
+	f32 amount_away_from_center = -dot(center, displacement);
 
 	if (distance_from_center < COLLISION_EPSILON)
 	{
@@ -272,7 +271,7 @@ internal CollisionResult collide_against_circle(vf2 pos, vf2 displacement, vf2 c
 						{
 							.type             = CollisionType::collided,
 							.new_displacement = displacement * intersection_scalar,
-							.normal           = rel_pos / distance_from_center,
+							.normal           = -center / distance_from_center,
 							.priority         = -intersection_scalar
 						};
 				}
@@ -289,22 +288,22 @@ internal CollisionResult collide_against_circle(vf2 pos, vf2 displacement, vf2 c
 		return
 			{
 				.type             = CollisionType::embedded,
-				.new_displacement = rel_pos * (radius / distance_from_center - 1.0f),
-				.normal           = rel_pos / distance_from_center,
+				.new_displacement = -center * (radius / distance_from_center - 1.0f),
+				.normal           = -center / distance_from_center,
 				.priority         = radius - distance_from_center
 			};
 	}
 }
 
-internal CollisionResult collide_against_rounded_rectangle(vf2 pos, vf2 displacement, vf2 rect_bottom_left, vf2 rect_dims, f32 padding)
+internal CollisionResult collide_against_rounded_rectangle(vf2 displacement, vf2 rect_bottom_left, vf2 rect_dims, f32 padding)
 {
-	CollisionResult left_right = collide_against_line(pos, displacement, rect_bottom_left + vf2 { rect_dims.x / 2.0f, 0.0f }, { 1.0f, 0.0f }, rect_dims.x / 2.0f + padding);
-	if (left_right.type != CollisionType::none && !IN_RANGE(pos.y + left_right.new_displacement.y - rect_bottom_left.y, 0.0f, rect_dims.y))
+	CollisionResult left_right = collide_against_line(displacement, rect_bottom_left + vf2 { rect_dims.x / 2.0f, 0.0f }, { 1.0f, 0.0f }, rect_dims.x / 2.0f + padding);
+	if (left_right.type != CollisionType::none && !IN_RANGE(left_right.new_displacement.y - rect_bottom_left.y, 0.0f, rect_dims.y))
 	{
 		left_right.type = CollisionType::none;
 	}
-	CollisionResult bottom_top = collide_against_line(pos, displacement, rect_bottom_left + vf2 { 0.0f, rect_dims.y / 2.0f }, { 0.0f, 1.0f }, rect_dims.y / 2.0f + padding);
-	if (bottom_top.type != CollisionType::none && !IN_RANGE(pos.x + bottom_top.new_displacement.x - rect_bottom_left.x, 0.0f, rect_dims.x))
+	CollisionResult bottom_top = collide_against_line(displacement, rect_bottom_left + vf2 { 0.0f, rect_dims.y / 2.0f }, { 0.0f, 1.0f }, rect_dims.y / 2.0f + padding);
+	if (bottom_top.type != CollisionType::none && !IN_RANGE(bottom_top.new_displacement.x - rect_bottom_left.x, 0.0f, rect_dims.x))
 	{
 		bottom_top.type = CollisionType::none;
 	}
@@ -315,10 +314,80 @@ internal CollisionResult collide_against_rounded_rectangle(vf2 pos, vf2 displace
 			prioritize_collision_results(bottom_top, left_right),
 			prioritize_collision_results
 			(
-				prioritize_collision_results(collide_against_circle(pos, displacement, rect_bottom_left                            , padding), collide_against_circle(pos, displacement, rect_bottom_left + vf2 { rect_dims.x, 0.0f }, padding)),
-				prioritize_collision_results(collide_against_circle(pos, displacement, rect_bottom_left + vf2 { 0.0f, rect_dims.y }, padding), collide_against_circle(pos, displacement, rect_bottom_left +       rect_dims          , padding))
+				prioritize_collision_results(collide_against_circle(displacement, rect_bottom_left                            , padding), collide_against_circle(displacement, rect_bottom_left + vf2 { rect_dims.x, 0.0f }, padding)),
+				prioritize_collision_results(collide_against_circle(displacement, rect_bottom_left + vf2 { 0.0f, rect_dims.y }, padding), collide_against_circle(displacement, rect_bottom_left +       rect_dims          , padding))
 			)
 		);
+}
+
+// @TODO@ Add the other shapes.
+enum struct CollisionShapeType : u8
+{
+	null,
+	circle,
+	rounded_rectangle
+};
+
+struct CollisionShape
+{
+	CollisionShapeType type;
+	union
+	{
+		struct
+		{
+			f32 radius;
+		} circle;
+
+		struct
+		{
+			vf2 dims;
+			f32 padding;
+		} rounded_rectangle;
+	};
+};
+
+internal CollisionResult collide_shapes(vf2 displacement, CollisionShape a, vf2 pos, CollisionShape b)
+{
+	if (a.type <= b.type)
+	{
+		switch (a.type)
+		{
+			case CollisionShapeType::circle: switch (b.type)
+			{
+				case CollisionShapeType::circle: return
+					collide_against_circle(displacement, pos, a.circle.radius + b.circle.radius);
+
+				case CollisionShapeType::rounded_rectangle: return
+					collide_against_rounded_rectangle(displacement, pos, b.rounded_rectangle.dims, b.rounded_rectangle.padding + a.circle.radius);
+
+				default: ASSERT(false);
+					return {};
+			}
+
+			case CollisionShapeType::rounded_rectangle: switch (b.type)
+			{
+				case CollisionShapeType::rounded_rectangle: return
+					collide_against_rounded_rectangle(displacement, pos, a.rounded_rectangle.dims + b.rounded_rectangle.dims, b.rounded_rectangle.padding + b.rounded_rectangle.padding);
+
+				default: ASSERT(false);
+					return {};
+			}
+
+			default: ASSERT(false);
+				return {};
+		}
+	}
+	else
+	{
+		CollisionResult result = collide_shapes(-displacement, b, -pos, a);
+		return
+			{
+				.type             =  result.type,
+				.new_displacement = -result.new_displacement,
+				.normal           = -result.normal,
+				.priority         =  result.priority
+			};
+	}
 }
 
 internal Chunk* get_chunk(State* state, vi2 coords)
@@ -340,7 +409,6 @@ internal Chunk* get_chunk(State* state, vi2 coords)
 			{
 				if (!chunk_node->next_node)
 				{
-					DEBUG_printf("Chunk (%d %d) allocated on arena!\n", PASS_V2(coords));
 					chunk_node->next_node               = memory_arena_allocate_from_available(&state->available_chunk_node, &state->arena);
 					chunk_node->next_node->chunk.exists = false;
 				}
@@ -350,7 +418,6 @@ internal Chunk* get_chunk(State* state, vi2 coords)
 		}
 		else
 		{
-			DEBUG_printf("Chunk (%d %d) marked as existing!\n", PASS_V2(coords));
 			*chunk_node =
 				{
 					.chunk =
@@ -497,8 +564,131 @@ PlatformUpdate_t(PlatformUpdate)
 	// (Update) Hero.
 	//
 
-	constexpr f32 HERO_HITBOX_RADIUS = 0.3f;
-	constexpr f32 PET_HITBOX_RADIUS  = 0.3f;
+	enum struct MoveTag : u8
+	{
+		null,
+		hero,
+		pet
+	};
+
+	struct Move
+	{
+		MoveTag        tag;
+		CollisionShape shape;
+		Chunk*         chunk;
+		vf2            rel_pos;
+		vf2            vel;
+	};
+
+	constexpr CollisionShape HERO_COLLISION_SHAPE =
+		{
+			.type   = CollisionShapeType::circle,
+			.circle = { .radius = 0.3f }
+		};
+
+	constexpr CollisionShape PET_COLLISION_SHAPE =
+		{
+			.type   = CollisionShapeType::circle,
+			.circle = { .radius = 0.3f }
+		};
+
+	lambda process_move =
+		[&](Move* move)
+		{
+			vf2 displacement = move->vel * platform_delta_time;
+
+			// @TODO@ Better performing collision.
+			FOR_RANGE(8)
+			{
+				CollisionResult result = {};
+
+				// @TODO@ This checks chunks in a 3x3 adjacenct fashion. Could be better.
+				FOR_RANGE(i, 9)
+				{
+					Chunk* chunk = get_chunk(state, move->chunk->coords + vi2 { i % 3 - 1, i / 3 - 1 });
+
+					FOR_ELEMS(wall, move->chunk->wall_buffer, move->chunk->wall_count)
+					{
+						result =
+							prioritize_collision_results
+							(
+								result,
+								collide_shapes
+								(
+									displacement,
+									move->shape,
+									(chunk->coords - move->chunk->coords) * METERS_PER_CHUNK + wall->rel_pos - move->rel_pos,
+									{
+										.type              = CollisionShapeType::rounded_rectangle,
+										.rounded_rectangle =
+											{
+												.dims    = wall->dims,
+												.padding = 0.0f // @TODO@ Rectangle shape type.
+											}
+									}
+								)
+							);
+					}
+				}
+
+				if (move->tag != MoveTag::hero)
+				{
+					result =
+						prioritize_collision_results
+						(
+							result,
+							collide_shapes
+							(
+								displacement,
+								move->shape,
+								(state->hero_chunk->coords - move->chunk->coords) * METERS_PER_CHUNK + state->hero_rel_pos - move->rel_pos,
+								HERO_COLLISION_SHAPE
+							)
+						);
+				}
+
+				if (move->tag != MoveTag::pet)
+				{
+					result =
+						prioritize_collision_results
+						(
+							result,
+							collide_shapes
+							(
+								displacement,
+								move->shape,
+								(state->pet_chunk->coords - move->chunk->coords) * METERS_PER_CHUNK + state->pet_rel_pos - move->rel_pos,
+								PET_COLLISION_SHAPE
+							)
+						);
+				}
+
+				move->rel_pos +=
+					result.type == CollisionType::none
+						? displacement
+						: result.new_displacement;
+
+				vi2 delta_coords = { 0, 0 };
+				if      (move->rel_pos.x <              0.0f) { delta_coords.x -= 1; }
+				else if (move->rel_pos.x >= METERS_PER_CHUNK) { delta_coords.x += 1; }
+				if      (move->rel_pos.y <              0.0f) { delta_coords.y -= 1; }
+				else if (move->rel_pos.y >= METERS_PER_CHUNK) { delta_coords.y += 1; }
+				ASSERT(move->chunk->exists);
+				move->chunk    = get_chunk(state, move->chunk->coords + delta_coords);
+				move->rel_pos -= delta_coords * METERS_PER_CHUNK;
+
+				if (result.type == CollisionType::none)
+				{
+					break;
+				}
+				else
+				{
+					move->vel    = dot(move->vel    - result.new_displacement, rotate90(result.normal)) * rotate90(result.normal);
+					displacement = dot(displacement - result.new_displacement, rotate90(result.normal)) * rotate90(result.normal);
+				}
+			}
+		};
+
 	{
 		vf2 target_hero_vel = vxx(WASD_DOWN());
 		if (+target_hero_vel)
@@ -518,73 +708,18 @@ PlatformUpdate_t(PlatformUpdate)
 
 		state->hero_vel = dampen(state->hero_vel, target_hero_vel, 0.001f, platform_delta_time);
 
-		vf2 displacement = state->hero_vel * platform_delta_time;
-
-		// @TODO@ Better performing collision.
-		FOR_RANGE(8)
-		{
-			CollisionResult result = {};
-
-			// @TODO@ This checks chunks in a 3x3 adjacenct fashion. Could be better.
-			FOR_RANGE(i, 9)
+		Move move =
 			{
-				Chunk* chunk = get_chunk(state, state->hero_chunk->coords + vi2 { i % 3 - 1, i / 3 - 1 });
-
-				FOR_ELEMS(wall, chunk->wall_buffer, chunk->wall_count)
-				{
-					result =
-						prioritize_collision_results
-						(
-							result,
-							collide_against_rounded_rectangle
-							(
-								state->hero_chunk->coords * METERS_PER_CHUNK + state->hero_rel_pos,
-								displacement,
-								chunk->coords * METERS_PER_CHUNK + wall->rel_pos,
-								wall->dims,
-								HERO_HITBOX_RADIUS
-							)
-						);
-				}
-			}
-
-			result =
-				prioritize_collision_results
-				(
-					result,
-					collide_against_circle
-					(
-						state->hero_chunk->coords * METERS_PER_CHUNK + state->hero_rel_pos,
-						displacement,
-						state->pet_chunk->coords * METERS_PER_CHUNK + state->pet_rel_pos,
-						HERO_HITBOX_RADIUS + PET_HITBOX_RADIUS
-					)
-				);
-
-			state->hero_rel_pos +=
-				result.type == CollisionType::none
-					? displacement
-					: result.new_displacement;
-
-			vi2 delta_coords = { 0, 0 };
-			if      (state->hero_rel_pos.x <              0.0f) { delta_coords.x -= 1; }
-			else if (state->hero_rel_pos.x >= METERS_PER_CHUNK) { delta_coords.x += 1; }
-			if      (state->hero_rel_pos.y <              0.0f) { delta_coords.y -= 1; }
-			else if (state->hero_rel_pos.y >= METERS_PER_CHUNK) { delta_coords.y += 1; }
-			ASSERT(state->hero_chunk->exists);
-			state->hero_chunk    = get_chunk(state, state->hero_chunk->coords + delta_coords);
-			state->hero_rel_pos -= delta_coords * METERS_PER_CHUNK;
-
-			if (result.type == CollisionType::none)
-			{
-				break;
-			}
-			else
-			{
-				state->hero_vel = dot(state->hero_vel - result.new_displacement, rotate90(result.normal)) * rotate90(result.normal);
-				displacement    = dot(displacement    - result.new_displacement, rotate90(result.normal)) * rotate90(result.normal);
-			}
-		}
+				.tag     = MoveTag::hero,
+				.shape   = HERO_COLLISION_SHAPE,
+				.chunk   = state->hero_chunk,
+				.rel_pos = state->hero_rel_pos,
+				.vel     = state->hero_vel
+			};
+		process_move(&move);
+		state->hero_chunk   = move.chunk;
+		state->hero_rel_pos = move.rel_pos;
+		state->hero_vel     = move.vel;
 	}
 
 	//
@@ -616,73 +751,18 @@ PlatformUpdate_t(PlatformUpdate)
 			state->pet_vel = dampen(state->pet_vel, target_pet_vel, 0.1f, platform_delta_time);
 		}
 
-		vf2 displacement = state->pet_vel * platform_delta_time;
-
-		// @TODO@ Better performing collision.
-		FOR_RANGE(8)
-		{
-			CollisionResult result = {};
-
-			// @TODO@ This checks chunks in a 3x3 adjacenct fashion. Could be better.
-			FOR_RANGE(i, 9)
+		Move move =
 			{
-				Chunk* chunk = get_chunk(state, state->pet_chunk->coords + vi2 { i % 3 - 1, i / 3 - 1 });
-
-				FOR_ELEMS(wall, chunk->wall_buffer, chunk->wall_count)
-				{
-					result =
-						prioritize_collision_results
-						(
-							result,
-							collide_against_rounded_rectangle
-							(
-								state->pet_chunk->coords * METERS_PER_CHUNK + state->pet_rel_pos,
-								displacement,
-								chunk->coords * METERS_PER_CHUNK + wall->rel_pos,
-								wall->dims,
-								PET_HITBOX_RADIUS
-							)
-						);
-				}
-			}
-
-			result =
-				prioritize_collision_results
-				(
-					result,
-					collide_against_circle
-					(
-						state->pet_chunk->coords * METERS_PER_CHUNK + state->pet_rel_pos,
-						displacement,
-						state->hero_chunk->coords * METERS_PER_CHUNK + state->hero_rel_pos,
-						HERO_HITBOX_RADIUS + PET_HITBOX_RADIUS
-					)
-				);
-
-			state->pet_rel_pos +=
-				result.type == CollisionType::none
-					? displacement
-					: result.new_displacement;
-
-			vi2 delta_coords = { 0, 0 };
-			if      (state->pet_rel_pos.x <              0.0f) { delta_coords.x -= 1; }
-			else if (state->pet_rel_pos.x >= METERS_PER_CHUNK) { delta_coords.x += 1; }
-			if      (state->pet_rel_pos.y <              0.0f) { delta_coords.y -= 1; }
-			else if (state->pet_rel_pos.y >= METERS_PER_CHUNK) { delta_coords.y += 1; }
-			ASSERT(state->pet_chunk->exists);
-			state->pet_chunk    = get_chunk(state, state->pet_chunk->coords + delta_coords);
-			state->pet_rel_pos -= delta_coords * METERS_PER_CHUNK;
-
-			if (result.type == CollisionType::none)
-			{
-				break;
-			}
-			else
-			{
-				state->pet_vel = dot(state->pet_vel - result.new_displacement, rotate90(result.normal)) * rotate90(result.normal);
-				displacement   = dot(displacement   - result.new_displacement, rotate90(result.normal)) * rotate90(result.normal);
-			}
-		}
+				.tag     = MoveTag::pet,
+				.shape   = PET_COLLISION_SHAPE,
+				.chunk   = state->pet_chunk,
+				.rel_pos = state->pet_rel_pos,
+				.vel     = state->pet_vel,
+			};
+		process_move(&move);
+		state->pet_chunk   = move.chunk;
+		state->pet_rel_pos = move.rel_pos;
+		state->pet_vel     = move.vel;
 	}
 
 	//
@@ -733,7 +813,7 @@ PlatformUpdate_t(PlatformUpdate)
 	(
 		platform_framebuffer,
 		vxx(((state->hero_chunk->coords - state->camera_coords) * METERS_PER_CHUNK + state->hero_rel_pos - state->camera_rel_pos) * PIXELS_PER_METER),
-		static_cast<i32>(HERO_HITBOX_RADIUS * PIXELS_PER_METER),
+		static_cast<i32>(HERO_COLLISION_SHAPE.circle.radius * PIXELS_PER_METER),
 		rgba_from(0.9f, 0.5f, 0.1f)
 	);
 
@@ -749,7 +829,7 @@ PlatformUpdate_t(PlatformUpdate)
 	(
 		platform_framebuffer,
 		vxx(((state->pet_chunk->coords - state->camera_coords) * METERS_PER_CHUNK + state->pet_rel_pos - state->camera_rel_pos) * PIXELS_PER_METER),
-		static_cast<i32>(PET_HITBOX_RADIUS * PIXELS_PER_METER),
+		static_cast<i32>(PET_COLLISION_SHAPE.circle.radius * PIXELS_PER_METER),
 		rgba_from(0.9f, 0.5f, 0.8f)
 	);
 
