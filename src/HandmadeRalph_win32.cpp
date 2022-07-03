@@ -74,7 +74,7 @@ PlatformReadFileData_t(PlatformReadFileData)
 	if (handle == INVALID_HANDLE_VALUE)
 	{
 		DEBUG_printf(__FILE__ " :: " __FUNCTION__ " :: Failed to open file `%S` for reading.\n", platform_file_path);
-		return false;
+		return {};
 	}
 	DEFER { CloseHandle(handle); };
 
@@ -82,43 +82,45 @@ PlatformReadFileData_t(PlatformReadFileData)
 	if (!GetFileSizeEx(handle, &file_size))
 	{
 		DEBUG_printf(__FILE__ " :: " __FUNCTION__ " :: Failed to get size of `%S`.\n", platform_file_path);
-		return false;
+		return {};
 	}
 
-	platform_file_data->read_index = 0;
-	platform_file_data->size       = static_cast<u64>(file_size.QuadPart);
-	platform_file_data->data       = reinterpret_cast<byte*>(VirtualAlloc(0, platform_file_data->size, MEM_COMMIT, PAGE_READWRITE));
+	PlatformFileData platform_file_data =
+		{
+			.size = static_cast<u64>(file_size.QuadPart),
+			.data = reinterpret_cast<byte*>(VirtualAlloc(0, file_size.QuadPart, MEM_COMMIT, PAGE_READWRITE))
+		};
 
 	// @TODO@ Larger file sizes.
-	if (platform_file_data->size > 0xFFFFFFFF)
+	if (platform_file_data.size > 0xFFFFFFFF)
 	{
-		DEBUG_printf(__FILE__ " :: " __FUNCTION__ " :: File `%S` is too big (`%zu` bytes); must be less than 2^32 bytes (4.29GB).\n", platform_file_path, platform_file_data->size);
-		return false;
+		DEBUG_printf(__FILE__ " :: " __FUNCTION__ " :: File `%S` is too big (`%zu` bytes); must be less than 2^32 bytes (4.29GB).\n", platform_file_path, platform_file_data.size);
+		return {};
 	}
 
-	if (!platform_file_data->data)
+	if (!platform_file_data.data)
 	{
-		DEBUG_printf(__FILE__ " :: " __FUNCTION__ " :: Failed to allocate `%zu` bytes for `%S`.\n", platform_file_data->size, platform_file_path);
-		return false;
+		DEBUG_printf(__FILE__ " :: " __FUNCTION__ " :: Failed to allocate `%zu` bytes for `%S`.\n", platform_file_data.size, platform_file_path);
+		return {};
 	}
 
 	DWORD read_size;
-	if (!ReadFile(handle, platform_file_data->data, static_cast<u32>(platform_file_data->size), &read_size, 0))
+	if (!ReadFile(handle, platform_file_data.data, static_cast<u32>(platform_file_data.size), &read_size, 0))
 	{
 		DEBUG_printf(__FILE__ " :: " __FUNCTION__ " :: Failed to read file `%S`.\n", platform_file_path);
-		VirtualFree(platform_file_data->data, 0, MEM_RELEASE);
-		return false;
+		VirtualFree(platform_file_data.data, 0, MEM_RELEASE);
+		return {};
 	}
 
-	if (read_size != platform_file_data->size)
+	if (read_size != platform_file_data.size)
 	{
-		DEBUG_printf(__FILE__ " :: " __FUNCTION__ " :: Incomplete read of `%ld` out of `%zu` bytes of `%S`.\n", read_size, platform_file_data->size, platform_file_path);
-		VirtualFree(platform_file_data->data, 0, MEM_RELEASE);
-		return false;
+		DEBUG_printf(__FILE__ " :: " __FUNCTION__ " :: Incomplete read of `%ld` out of `%zu` bytes of `%S`.\n", read_size, platform_file_data.size, platform_file_path);
+		VirtualFree(platform_file_data.data, 0, MEM_RELEASE);
+		return {};
 	}
 
 	g_unfreed_file_data_counter += 1;
-	return true;
+	return platform_file_data;
 }
 
 PlatformFreeFileData_t(PlatformFreeFileData)

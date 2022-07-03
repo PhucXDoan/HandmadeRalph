@@ -602,7 +602,8 @@ internal void process_move(Chunk** chunk, vf3* rel_pos, vf3* vel, CollisionShape
 			displacement.z  = 0.0f;
 		}
 	}
-};
+}
+
 PlatformUpdate_t(PlatformUpdate)
 {
 	State* state = reinterpret_cast<State*>(platform_memory);
@@ -619,8 +620,8 @@ PlatformUpdate_t(PlatformUpdate)
 
 		FOR_ELEMS(bmp, state->bmps)
 		{
-			PlatformFileData file_data;
-			if (!PlatformReadFileData(&file_data, state->BMP_FILE_PATHS[bmp_index]))
+			PlatformFileData file_data = PlatformReadFileData(state->BMP_FILE_PATHS[bmp_index]);
+			if (!file_data.data)
 			{
 				ASSERT(false);
 				return PlatformUpdateExitCode::abort;

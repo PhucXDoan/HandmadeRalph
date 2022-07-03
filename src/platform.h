@@ -112,7 +112,7 @@ enum struct PlatformUpdateExitCode : u8
 
 // @TODO@ Less generic IO system.
 // @TODO@ Macro that provides where the call was made?
-#define PlatformReadFileData_t(NAME) bool32 NAME(PlatformFileData* platform_file_data, wstrlit platform_file_path)
+#define PlatformReadFileData_t(NAME) PlatformFileData NAME(wstrlit platform_file_path)
 typedef PlatformReadFileData_t(PlatformReadFileData_t);
 
 #define PlatformFreeFileData_t(NAME) void NAME(PlatformFileData* platform_file_data)
