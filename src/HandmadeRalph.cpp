@@ -93,6 +93,7 @@ struct State
 
 	Rock       rock_buffer[16];
 	i32        rock_count;
+	f32        rock_throw_t;
 
 	vi2        camera_coords;
 	vf2        camera_rel_pos;
@@ -117,6 +118,8 @@ internal TYPE eat(PlatformFileData* file_data)
 
 internal void draw_rect(PlatformFramebuffer* platform_framebuffer, vi2 bottom_left, vi2 dims, RGBA rgba)
 {
+	ASSERT(IN_RANGE(dims.x, 0, 1024));
+	ASSERT(IN_RANGE(dims.y, 0, 1024));
 	u32 pixel_value = pack_as_raw_argb(rgba);
 	FOR_RANGE(y, max(platform_framebuffer->dims.y - bottom_left.y - dims.y, 0), min(platform_framebuffer->dims.y - bottom_left.y, platform_framebuffer->dims.y))
 	{
@@ -150,6 +153,7 @@ internal void draw_bmp(PlatformFramebuffer* platform_framebuffer, BMP* bmp, vi2 
 
 internal void draw_circle(PlatformFramebuffer* platform_framebuffer, vi2 pos, i32 radius, RGBA rgba)
 {
+	ASSERT(IN_RANGE(radius, 0, 128));
 	i32 x0          = clamp(                               pos.x - radius, 0, platform_framebuffer->dims.x);
 	i32 x1          = clamp(                               pos.x + radius, 0, platform_framebuffer->dims.x);
 	i32 y0          = clamp(platform_framebuffer->dims.y - pos.y - radius, 0, platform_framebuffer->dims.y);
@@ -432,6 +436,173 @@ internal Chunk* get_chunk(State* state, vi2 coords)
 	return &chunk_node->chunk;
 }
 
+constexpr CollisionShape HERO_COLLISION_SHAPE =
+	{
+		.type   = CollisionShapeType::circle,
+		.circle = { .radius = 0.3f }
+	};
+
+constexpr CollisionShape PET_COLLISION_SHAPE =
+	{
+		.type   = CollisionShapeType::circle,
+		.circle = { .radius = 0.3f }
+	};
+
+constexpr CollisionShape ROCK_COLLISION_SHAPE =
+	{
+		.type   = CollisionShapeType::circle,
+		.circle = { .radius = 0.6f }
+	};
+
+enum struct MoveTag : u8
+{
+	null,
+	hero,
+	pet,
+	rock
+};
+
+internal void process_move(Chunk** chunk, vf3* rel_pos, vf3* vel, CollisionShape shape, MoveTag tag, void* semantic, State* state, f32 delta_time)
+{
+	vel->z += GRAVITY * delta_time;
+
+	vf3 displacement = *vel * delta_time;
+
+	// @TODO@ Better performing collision.
+	FOR_RANGE(8)
+	{
+		CollisionResult result = {};
+
+		// @TODO@ This checks chunks in a 3x3 adjacenct fashion. Could be better.
+		FOR_RANGE(i, 9)
+		{
+			Chunk* wall_chunk = get_chunk(state, (*chunk)->coords + vi2 { i % 3 - 1, i / 3 - 1 });
+
+			FOR_ELEMS(wall, wall_chunk->wall_buffer, wall_chunk->wall_count)
+			{
+				result =
+					prioritize_collision_results
+					(
+						result,
+						collide_shapes
+						(
+							displacement.xy,
+							shape,
+							(wall_chunk->coords - (*chunk)->coords) * METERS_PER_CHUNK + wall->rel_pos - rel_pos->xy,
+							{
+								.type              = CollisionShapeType::rounded_rectangle,
+								.rounded_rectangle =
+									{
+										.dims    = wall->dims,
+										.padding = 0.0f // @TODO@ Rectangle shape type.
+									}
+							}
+						)
+					);
+			}
+		}
+
+		if (tag != MoveTag::hero)
+		{
+			FOR_ELEMS(rock, state->rock_buffer, state->rock_count)
+			{
+				if (IMPLIES(tag == MoveTag::rock, semantic != rock))
+				{
+					result =
+						prioritize_collision_results
+						(
+							result,
+							collide_shapes
+							(
+								displacement.xy,
+								shape,
+								(rock->chunk->coords - (*chunk)->coords) * METERS_PER_CHUNK + rock->rel_pos.xy - rel_pos->xy,
+								ROCK_COLLISION_SHAPE
+							)
+						);
+				}
+			}
+		}
+
+		if (tag != MoveTag::hero && tag != MoveTag::rock)
+		{
+			result =
+				prioritize_collision_results
+				(
+					result,
+					collide_shapes
+					(
+						displacement.xy,
+						shape,
+						(state->hero_chunk->coords - (*chunk)->coords) * METERS_PER_CHUNK + state->hero_rel_pos.xy - rel_pos->xy,
+						HERO_COLLISION_SHAPE
+					)
+				);
+		}
+
+		if (tag != MoveTag::pet)
+		{
+			result =
+				prioritize_collision_results
+				(
+					result,
+					collide_shapes
+					(
+						displacement.xy,
+						shape,
+						(state->pet_chunk->coords - (*chunk)->coords) * METERS_PER_CHUNK + state->pet_rel_pos.xy - rel_pos->xy,
+						PET_COLLISION_SHAPE
+					)
+				);
+		}
+
+		rel_pos->xy +=
+			result.type == CollisionType::none
+				? displacement.xy
+				: result.new_displacement;
+
+		vi2 delta_coords = { 0, 0 };
+		if      (rel_pos->x <              0.0f) { delta_coords.x -= 1; }
+		else if (rel_pos->x >= METERS_PER_CHUNK) { delta_coords.x += 1; }
+		if      (rel_pos->y <              0.0f) { delta_coords.y -= 1; }
+		else if (rel_pos->y >= METERS_PER_CHUNK) { delta_coords.y += 1; }
+		ASSERT((*chunk)->exists);
+		*chunk       = get_chunk(state, (*chunk)->coords + delta_coords);
+		rel_pos->xy -= delta_coords * METERS_PER_CHUNK;
+
+		rel_pos->z += displacement.z;
+		if (rel_pos->z <= 0.0f)
+		{
+			rel_pos->z  = 0.0f;
+			vel->z     *= -0.35f;
+
+			if (tag == MoveTag::rock)
+			{
+				vel->xy = dampen(vel->xy, { 0.0f, 0.0f }, 0.005f, delta_time);
+			}
+		}
+
+		if (result.type == CollisionType::none)
+		{
+			break;
+		}
+		else
+		{
+			if (tag == MoveTag::rock)
+			{
+				vel->xy         = 0.15f * (dot(vel->xy         - result.new_displacement, rotate90(result.normal)) * rotate90(result.normal) * 2.0f + (result.new_displacement - vel->xy   ));
+				displacement.xy = 0.15f * (dot(displacement.xy - result.new_displacement, rotate90(result.normal)) * rotate90(result.normal) * 2.0f + (result.new_displacement - displacement.xy));
+			}
+			else
+			{
+				vel->xy         = dot(vel->xy         - result.new_displacement, rotate90(result.normal)) * rotate90(result.normal);
+				displacement.xy = dot(displacement.xy - result.new_displacement, rotate90(result.normal)) * rotate90(result.normal);
+			}
+
+			displacement.z  = 0.0f;
+		}
+	}
+};
 PlatformUpdate_t(PlatformUpdate)
 {
 	State* state = reinterpret_cast<State*>(platform_memory);
@@ -559,148 +730,6 @@ PlatformUpdate_t(PlatformUpdate)
 		state->pet_rel_pos = { 7.0f, 9.0f };
 	}
 
-	enum struct MoveTag : u8
-	{
-		null,
-		hero,
-		pet,
-		rock
-	};
-
-	struct Move
-	{
-		MoveTag        tag;
-		CollisionShape shape;
-		Chunk*         chunk;
-		vf3            rel_pos;
-		vf3            vel;
-	};
-
-	constexpr CollisionShape HERO_COLLISION_SHAPE =
-		{
-			.type   = CollisionShapeType::circle,
-			.circle = { .radius = 0.3f }
-		};
-
-	constexpr CollisionShape PET_COLLISION_SHAPE =
-		{
-			.type   = CollisionShapeType::circle,
-			.circle = { .radius = 0.3f }
-		};
-
-	lambda process_move =
-		[&](Move* move)
-		{
-			vf3 displacement = move->vel * platform_delta_time;
-
-			// @TODO@ Better performing collision.
-			FOR_RANGE(8)
-			{
-				CollisionResult result = {};
-
-				if (move->tag != MoveTag::rock)
-				{
-					// @TODO@ This checks chunks in a 3x3 adjacenct fashion. Could be better.
-					FOR_RANGE(i, 9)
-					{
-						Chunk* chunk = get_chunk(state, move->chunk->coords + vi2 { i % 3 - 1, i / 3 - 1 });
-
-						FOR_ELEMS(wall, move->chunk->wall_buffer, move->chunk->wall_count)
-						{
-							result =
-								prioritize_collision_results
-								(
-									result,
-									collide_shapes
-									(
-										displacement.xy,
-										move->shape,
-										(chunk->coords - move->chunk->coords) * METERS_PER_CHUNK + wall->rel_pos - move->rel_pos.xy,
-										{
-											.type              = CollisionShapeType::rounded_rectangle,
-											.rounded_rectangle =
-												{
-													.dims    = wall->dims,
-													.padding = 0.0f // @TODO@ Rectangle shape type.
-												}
-										}
-									)
-								);
-						}
-					}
-
-					if (move->tag != MoveTag::hero)
-					{
-						result =
-							prioritize_collision_results
-							(
-								result,
-								collide_shapes
-								(
-									displacement.xy,
-									move->shape,
-									(state->hero_chunk->coords - move->chunk->coords) * METERS_PER_CHUNK + state->hero_rel_pos.xy - move->rel_pos.xy,
-									HERO_COLLISION_SHAPE
-								)
-							);
-					}
-
-					if (move->tag != MoveTag::pet)
-					{
-						result =
-							prioritize_collision_results
-							(
-								result,
-								collide_shapes
-								(
-									displacement.xy,
-									move->shape,
-									(state->pet_chunk->coords - move->chunk->coords) * METERS_PER_CHUNK + state->pet_rel_pos.xy - move->rel_pos.xy,
-									PET_COLLISION_SHAPE
-								)
-							);
-					}
-				}
-
-				move->rel_pos.xy +=
-					result.type == CollisionType::none
-						? displacement.xy
-						: result.new_displacement;
-
-				vi2 delta_coords = { 0, 0 };
-				if      (move->rel_pos.x <              0.0f) { delta_coords.x -= 1; }
-				else if (move->rel_pos.x >= METERS_PER_CHUNK) { delta_coords.x += 1; }
-				if      (move->rel_pos.y <              0.0f) { delta_coords.y -= 1; }
-				else if (move->rel_pos.y >= METERS_PER_CHUNK) { delta_coords.y += 1; }
-				ASSERT(move->chunk->exists);
-				move->chunk       = get_chunk(state, move->chunk->coords + delta_coords);
-				move->rel_pos.xy -= delta_coords * METERS_PER_CHUNK;
-
-				move->rel_pos.z += displacement.z;
-				if (move->rel_pos.z <= 0.0f)
-				{
-					move->rel_pos.z  = 0.0f;
-					move->vel.z     *= -0.35f;
-
-					if (move->tag == MoveTag::rock)
-					{
-						move->vel.xy = dampen(move->vel.xy, { 0.0f, 0.0f }, 0.005f, platform_delta_time);
-					}
-				}
-
-				if (result.type == CollisionType::none)
-				{
-					break;
-				}
-				else
-				{
-					move->vel.xy    = dot(move->vel.xy - result.new_displacement, rotate90(result.normal)) * rotate90(result.normal);
-					displacement.xy = dot(displacement.xy - result.new_displacement, rotate90(result.normal)) * rotate90(result.normal);
-					displacement.z  = 0.0f;
-				}
-			}
-		};
-
 	//
 	// Update Hero.
 	//
@@ -722,21 +751,9 @@ PlatformUpdate_t(PlatformUpdate)
 			}
 		}
 
-		state->hero_vel.xy  = dampen(state->hero_vel.xy, target_hero_vel, 0.001f, platform_delta_time);
-		state->hero_vel.z  += GRAVITY * platform_delta_time;
+		state->hero_vel.xy = dampen(state->hero_vel.xy, target_hero_vel, 0.001f, platform_delta_time);
 
-		Move move =
-			{
-				.tag     = MoveTag::hero,
-				.shape   = HERO_COLLISION_SHAPE,
-				.chunk   = state->hero_chunk,
-				.rel_pos = state->hero_rel_pos,
-				.vel     = state->hero_vel
-			};
-		process_move(&move);
-		state->hero_chunk   = move.chunk;
-		state->hero_rel_pos = move.rel_pos;
-		state->hero_vel     = move.vel;
+		process_move(&state->hero_chunk, &state->hero_rel_pos, &state->hero_vel, HERO_COLLISION_SHAPE, MoveTag::hero, 0, state, platform_delta_time);
 	}
 
 	//
@@ -764,21 +781,9 @@ PlatformUpdate_t(PlatformUpdate)
 			else if (ray_to_hero.y >  1.0f / SQRT2) { state->pet_cardinal = Cardinal_up;    }
 		}
 
-		state->pet_vel.xy  = dampen(state->pet_vel.xy, target_pet_vel, 0.1f, platform_delta_time);
-		state->pet_vel.z  += GRAVITY * platform_delta_time;
+		state->pet_vel.xy = dampen(state->pet_vel.xy, target_pet_vel, 0.1f, platform_delta_time);
 
-		Move move =
-			{
-				.tag     = MoveTag::pet,
-				.shape   = PET_COLLISION_SHAPE,
-				.chunk   = state->pet_chunk,
-				.rel_pos = state->pet_rel_pos,
-				.vel     = state->pet_vel
-			};
-		process_move(&move);
-		state->pet_chunk   = move.chunk;
-		state->pet_rel_pos = move.rel_pos;
-		state->pet_vel     = move.vel;
+		process_move(&state->pet_chunk, &state->pet_rel_pos, &state->pet_vel, PET_COLLISION_SHAPE, MoveTag::pet, 0, state, platform_delta_time);
 	}
 
 	//
@@ -786,40 +791,46 @@ PlatformUpdate_t(PlatformUpdate)
 	//
 
 	{
-		if (BTN_PRESSES(.space))
+		state->rock_throw_t -= platform_delta_time / 1.0f;
+
+		if (BTN_PRESSES(.space) && state->rock_throw_t <= 0.0f)
 		{
-			ASSERT(IN_RANGE(state->rock_count, 0, ARRAY_CAPACITY(state->rock_buffer)));
-			state->rock_buffer[state->rock_count] =
+			state->rock_throw_t = 1.0f;
+
+			// @TODO@ Nice way to find out if a rock is on top of an entity.
+			bool32 colliding = false;
+			FOR_ELEMS(rock, state->rock_buffer, state->rock_count)
+			{
+				if (collide_shapes({ 0.0f, 0.0f }, ROCK_COLLISION_SHAPE, (rock->chunk->coords - state->hero_chunk->coords) * METERS_PER_CHUNK + rock->rel_pos.xy - state->hero_rel_pos.xy, ROCK_COLLISION_SHAPE).type != CollisionType::none)
 				{
-					.bmp_index   = rng(&state->seed, 0, ARRAY_CAPACITY(state->bmp.rocks)),
-					.chunk       = state->hero_chunk,
-					.rel_pos     = state->hero_rel_pos + vf3 { 0.0f, 0.0f, 1.0f },
-					.vel         = vxx(state->hero_vel.xy + CARDINAL_VF2[state->hero_cardinal] * 2.0f, 1.0f),
-					.existence_t = 1.0f
-				};
-			state->rock_count += 1;
+					colliding = true;
+					break;
+				}
+			}
+			if (!colliding)
+			{
+				ASSERT(IN_RANGE(state->rock_count, 0, ARRAY_CAPACITY(state->rock_buffer)));
+				state->rock_buffer[state->rock_count] =
+					{
+						.bmp_index   = rng(&state->seed, 0, ARRAY_CAPACITY(state->bmp.rocks)),
+						.chunk       = state->hero_chunk,
+						.rel_pos     = state->hero_rel_pos + vf3 { 0.0f, 0.0f, 1.0f },
+						.vel         = vxx(state->hero_vel.xy + CARDINAL_VF2[state->hero_cardinal] * 2.0f, 1.0f),
+						.existence_t = 1.0f
+					};
+				state->rock_count += 1;
+			}
 		}
 	}
 
 	FOR_ELEMS(rock, state->rock_buffer, state->rock_count)
 	{
-		rock->existence_t -= platform_delta_time / 4.0f; // @TODO@ Update rock based on how much time left.
 		if (rock->existence_t > 0.0f)
 		{
-			rock->vel.z += GRAVITY * platform_delta_time;
-
-			Move move =
-				{
-					.tag     = MoveTag::rock,
-					.shape   = { .type = CollisionShapeType::point },
-					.chunk   = rock->chunk,
-					.rel_pos = rock->rel_pos,
-					.vel     = rock->vel
-				};
-			process_move(&move);
-			rock->chunk   = move.chunk;
-			rock->rel_pos = move.rel_pos;
-			rock->vel     = move.vel;
+			constexpr f32 DURATION = 4.0f;
+			f32 old_existence_t = rock->existence_t;
+			rock->existence_t = clamp(rock->existence_t - platform_delta_time / DURATION, 0.0f, 1.0f);
+			process_move(&rock->chunk, &rock->rel_pos, &rock->vel, ROCK_COLLISION_SHAPE, MoveTag::rock, rock, state, (old_existence_t - rock->existence_t) * DURATION);
 		}
 	}
 
@@ -921,6 +932,19 @@ PlatformUpdate_t(PlatformUpdate)
 	FOR_ELEMS(rock, state->rock_buffer, state->rock_count)
 	{
 		ASSERT(IN_RANGE(rock->bmp_index, 0, ARRAY_CAPACITY(state->bmp.rocks)));
+		draw_circle
+		(
+			platform_framebuffer,
+			screen_coords_of(rock->chunk->coords, vxx(rock->rel_pos.xy, 0.0f)),
+			static_cast<i32>(ROCK_COLLISION_SHAPE.circle.radius * PIXELS_PER_METER),
+			rgba_from(0.2f, 0.4f, 0.3f)
+		);
+		draw_bmp
+		(
+			platform_framebuffer,
+			&state->bmp.hero_shadow,
+			screen_coords_of(rock->chunk->coords, vxx(rock->rel_pos.xy, 0.0f)) - vxx(state->bmp.hero_shadow.dims * vf2 { 0.5f, 0.225f })
+		);
 		draw_bmp
 		(
 			platform_framebuffer,
