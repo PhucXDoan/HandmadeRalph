@@ -10,8 +10,8 @@ IF NOT EXIST W:\build\ (
 )
 
 pushd W:\build\
-	del W:\src\meta\ /Q
-	cl %COMMON_COMPILER_FLAGS% /WX                  W:\src\metaprogram.cpp         /link %COMMON_LINKER_FLAGS%
+	REM del W:\src\meta\ /Q
+	cl %COMMON_COMPILER_FLAGS% /WX                  W:\src\metaprogram.cpp         /link %COMMON_LINKER_FLAGS% shell32.lib
 	if !ERRORLEVEL! neq 0 (
 		echo Metaprogram compilation failed.
 		goto ABORT

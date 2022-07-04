@@ -39,13 +39,16 @@ struct BMP
 
 constexpr vf2 CARDINAL_VF2[4] = { { -1.0f, 0.0f }, { 1.0f, 0.0f }, { 0.0f, -1.0f, }, { 0.0f, 1.0f } };
 constexpr vi2 CARDINAL_VI2[4] = { { -1   , 0    }, { 1   , 0    }, { 0   , -1   , }, { 0   , 1    } };
-enum Cardinal : u8
+
+
+enum Cardinal : u8 // @META@ vf2 vf; vi2 vi;
 {
-	Cardinal_left,
-	Cardinal_right,
-	Cardinal_down,
-	Cardinal_up
+	Cardinal_left,  // @META@ { -1.0f,  0.0f }, { -1,  0 }
+	Cardinal_right, // @META@ {  1.0f,  0.0f }, {  1,  0 }
+	Cardinal_down,  // @META@ {  0.0f, -1.0f }, {  0, -1 }
+	Cardinal_up     // @META@ {  0.0f,  1.0f }, {  0,  1 }
 };
+#include "meta_temp/enum/Cardinal.temp.h"
 
 struct Rock
 {
@@ -75,7 +78,7 @@ struct State
 		}   bmp;
 		BMP bmps[sizeof(bmp) / sizeof(BMP)];
 	};
-	#include "meta/bmp_file_paths.h"
+	#include "meta/asset/bmp_file_paths.h"
 
 	ChunkNode* available_chunk_node;
 	ChunkNode  chunk_node_hash_table[64];
@@ -620,7 +623,7 @@ PlatformUpdate_t(PlatformUpdate)
 
 		FOR_ELEMS(bmp, state->bmps)
 		{
-			PlatformFileData file_data = PlatformReadFileData(state->BMP_FILE_PATHS[bmp_index]);
+			PlatformFileData file_data = PlatformReadFileData(state->META_bmp_file_paths[bmp_index]);
 			if (!file_data.data)
 			{
 				ASSERT(false);

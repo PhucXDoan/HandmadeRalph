@@ -90,6 +90,7 @@ typedef double         f64;
 	#define DEBUG_persist static
 
 	#define ASSERT(EXPRESSION) do { if (!(EXPRESSION)) { *reinterpret_cast<i32*>(0) = 0; } } while (false)
+	#define DEBUG_HALT()       __debugbreak()
 
 	#define DEBUG_printf(FSTR, ...)\
 	do\
@@ -158,6 +159,7 @@ typedef double         f64;
 	while (false)
 #else
 	#define ASSERT(EXPRESSION)
+	#define DEBUG_HALT()
 	#define DEBUG_printf(FSTR, ...)
 	#define DEBUG_once                       if (true); else
 	#define DEBUG_PROFILER_create_group(...)
@@ -675,23 +677,89 @@ internal constexpr bool32 is_digit(const char& c) { return IN_RANGE(c, '0', '9' 
 internal constexpr char   uppercase(const char& c) { return IN_RANGE(c, 'a', 'z' + 1) ? c - 'a' + 'A' : c; }
 internal constexpr char   lowercase(const char& c) { return IN_RANGE(c, 'A', 'Z' + 1) ? c - 'A' + 'a' : c; }
 
-#define STRING_VIEW_OF(STRLIT) (StringView { .size = sizeof(STRLIT) - 1, .data = (STRLIT) })
+#define STR_OF(STRLIT) (String { .size = sizeof(STRLIT) - 1, .data = (STRLIT) })
+#define PASS_STR(STR)  (STR).size, (STR).data
 
-struct StringView
+struct String
 {
 	i32         size;
 	const char* data;
 };
 
-internal constexpr bool32 operator==(const StringView& a, const StringView& b) { return a.size == b.size && memcmp(a.data, b.data, static_cast<size_t>(a.size)) == 0; }
-internal constexpr bool32 operator!=(const StringView& a, const StringView& b) { return !(a == b); }
+internal constexpr bool32 operator+ (const String& str                 ) { return str.size > 0 && str.data; }
+internal constexpr bool32 operator==(const String& a  , const String& b) { return a.size == b.size && memcmp(a.data, b.data, static_cast<size_t>(a.size)) == 0; }
+internal constexpr bool32 operator!=(const String& a  , const String& b) { return !(a == b); }
 
-internal constexpr StringView trunc(const StringView& string, i32 maximum_length)
+internal constexpr String trunc(const String& str, i32 maximum_length)
 {
-	return { .size = min(string.size, maximum_length), .data = string.data };
+	return { .size = min(str.size, maximum_length), .data = str.data };
 }
 
-internal constexpr bool32 starts_with(const StringView& string, const StringView& prefix)
+internal constexpr String rtrunc(const String& str, i32 maximum_length)
 {
-	return trunc(string, prefix.size) == prefix;
+	return { .size = min(str.size, maximum_length), .data = str.data + max(0, str.size - maximum_length) };
+}
+
+internal constexpr String trunc(const String& str, char character)
+{
+	FOR_ELEMS(c, str.data, str.size)
+	{
+		if (*c == character)
+		{
+			return { c_index, str.data };
+		}
+	}
+	return str;
+}
+
+internal constexpr String rtrunc(const String& str, char character)
+{
+	FOR_ELEMS_REV(c, str.data, str.size)
+	{
+		if (*c == character)
+		{
+			return { str.size - c_index - 1, str.data + c_index + 1 };
+		}
+	}
+	return str;
+}
+
+internal constexpr bool32 starts_with(const String& str, const String& prefix)
+{
+	return trunc(str, prefix.size) == prefix;
+}
+
+internal constexpr String shift(const String& str, const i32& count)
+{
+	return { clamp(str.size - count, 0, str.size), str.data + clamp(str.size, 0, count) };
+}
+
+internal constexpr String shift(const String& str, const char& character)
+{
+	FOR_ELEMS(c, str.data, str.size)
+	{
+		if (*c == character)
+		{
+			return shift(str, c_index + 1);
+		}
+	}
+	return {};
+}
+
+internal constexpr String trim_whitespace(const String& str)
+{
+	String result = str;
+
+	while (+result && (result.data[0] == ' ' || result.data[0] == '\t' || result.data[0] == '\n'))
+	{
+		result.size -= 1;
+		result.data += 1;
+	}
+
+	while (+result && (result.data[result.size - 1] == ' ' || result.data[result.size - 1] == '\t' || result.data[result.size - 1] == '\n'))
+	{
+		result.size -= 1;
+	}
+
+	return result;
 }
