@@ -466,12 +466,19 @@ enum struct ContainerType : u8
 	a_union
 };
 
+enum struct EnumType : u8
+{
+	enum_unscoped,
+	enum_struct
+};
+
 enum struct ASTType : u8
 {
 	null,
 	root_type,
 	array,
 	container,
+	enumerator,
 	declaration,
 	tokens
 };
@@ -508,8 +515,17 @@ struct AST
 
 		struct
 		{
+			EnumType  type;
+			String    name;
+			AST*      underlying_type;
+			ASTNode*  declarations;
+		} enumerator;
+
+		struct
+		{
 			String name;
 			AST*   underlying_type;
+			AST*   assignment;
 		} declaration;
 
 		struct
@@ -544,66 +560,15 @@ internal AST* init_ast(Tokenizer* tokenizer)
 	AST* ast = reinterpret_cast<AST*>(malloc(sizeof(AST)));
 	*ast = {};
 
-	if (token.kind == TokenKind::identifier)
+	if (token.kind == TokenKind::identifier && (token.str == STR_OF("struct") || token.str == STR_OF("union")))
 	{
-		if (token.str == STR_OF("struct"))
-		{
-			ast->type           = ASTType::container;
-			ast->container.type = ContainerType::a_struct;
-		}
-		else if (token.str == STR_OF("union"))
-		{
-			ast->type           = ASTType::container;
-			ast->container.type = ContainerType::a_union;
-		}
-		else
-		{
-			if (peek(*tokenizer, 1).kind == TokenKind::identifier)
-			{
-				AST* underlying_type = reinterpret_cast<AST*>(malloc(sizeof(AST)));
-				*underlying_type = {};
-				underlying_type->type           = ASTType::root_type;
-				underlying_type->root_type.name = token.str;
+		ast->type           = ASTType::container;
+		ast->container.type =
+			token.str == STR_OF("struct")
+				? ContainerType::a_struct
+				: ContainerType::a_union;
 
-				token = shift(tokenizer, 1);
-				ast->type                        = ASTType::declaration;
-				ast->declaration.name            = token.str;
-				ast->declaration.underlying_type = underlying_type;
-
-				token = shift(tokenizer, 1);
-
-				if (token.kind == static_cast<TokenKind>('['))
-				{
-					AST* array = reinterpret_cast<AST*>(malloc(sizeof(AST)));
-					*array = {};
-					array->type                  = ASTType::array;
-					array->array.underlying_type = underlying_type;
-
-					AST* capacity = reinterpret_cast<AST*>(malloc(sizeof(AST)));
-					*capacity = {};
-					capacity->type        = ASTType::tokens;
-					capacity->tokens.node = 0;
-
-					TokenNode** nil = &capacity->tokens.node;
-					for (token = shift(tokenizer, 1); token.kind != static_cast<TokenKind>(']'); token = shift(tokenizer, 1))
-					{
-						ASSERT(token.kind != TokenKind::null);
-						*nil = init_single_token_node(token);
-						nil  = &(*nil)->next;
-					}
-
-					array->array.capacity            = capacity;
-					ast->declaration.underlying_type = array;
-
-					token = shift(tokenizer, 1);
-				}
-
-				return ast;
-			}
-
-			free(ast);
-			return 0;
-		}
+		ast->container.type = ContainerType::a_union;
 
 		token = shift(tokenizer, 1);
 
@@ -663,7 +628,128 @@ internal AST* init_ast(Tokenizer* tokenizer)
 		// @TODO@ Array of inlined structs.
 
 		return ast;
+	}
+	else if (token.kind == TokenKind::identifier && token.str == STR_OF("enum"))
+	{ // @TODO@ Consider all forms of enums.
+		ast->type = ASTType::enumerator;
 
+		token = shift(tokenizer, 1);
+		ASSERT(token.kind == TokenKind::identifier);
+
+		if (token.str == STR_OF("struct"))
+		{
+			ast->enumerator.type = EnumType::enum_struct;
+			token = shift(tokenizer, 1);
+			ASSERT(token.kind == TokenKind::identifier);
+		}
+
+		ast->enumerator.name = token.str;
+
+		token = shift(tokenizer, 1);
+		ASSERT(token.kind == static_cast<TokenKind>(':'));
+
+		token = shift(tokenizer, 1);
+		ASSERT(token.kind == TokenKind::identifier);
+		AST* underlying_type = reinterpret_cast<AST*>(malloc(sizeof(AST)));
+		*underlying_type = {};
+		underlying_type->type           = ASTType::root_type;
+		underlying_type->root_type.name = token.str;
+		ast->enumerator.underlying_type = underlying_type;
+
+		token = shift(tokenizer, 1);
+		if (token.kind == TokenKind::meta)
+		{
+			ast->meta = token.str;
+			token = shift(tokenizer, 1);
+		}
+		ASSERT(token.kind == static_cast<TokenKind>('{'));
+
+		token = shift(tokenizer, 1);
+		ASTNode** nil = &ast->enumerator.declarations;
+		while (true)
+		{
+			if (token.kind == TokenKind::identifier)
+			{
+				AST* declaration = reinterpret_cast<AST*>(malloc(sizeof(AST)));
+				*declaration = {};
+				declaration->type             = ASTType::declaration;
+				declaration->declaration.name = token.str;
+
+				token = shift(tokenizer, 1);
+				if (token.kind == static_cast<TokenKind>('='))
+				{
+					ASSERT("Enum assignments are not handled yet."); // @TODO@
+				}
+				if (token.kind == static_cast<TokenKind>(','))
+				{
+					token = shift(tokenizer, 1);
+				}
+				if (token.kind == TokenKind::meta)
+				{
+					declaration->meta = token.str;
+					token = shift(tokenizer, 1);
+				}
+
+				*nil = init_single_ast_node(declaration);
+				nil  = &(*nil)->next;
+			}
+			else if (token.kind == static_cast<TokenKind>('}'))
+			{
+				break;
+			}
+			else
+			{
+				ASSERT(!"Unexpected token.");
+			}
+		}
+
+		// @TODO@ Enum declaration.
+		token = shift(tokenizer, 1);
+		ASSERT(token.kind == static_cast<TokenKind>(';'));
+
+		return ast;
+	}
+	else if (token.kind == TokenKind::identifier && peek(*tokenizer, 1).kind == TokenKind::identifier)
+	{
+		AST* underlying_type = reinterpret_cast<AST*>(malloc(sizeof(AST)));
+		*underlying_type = {};
+		underlying_type->type           = ASTType::root_type;
+		underlying_type->root_type.name = token.str;
+
+		token = shift(tokenizer, 1);
+		ast->type                        = ASTType::declaration;
+		ast->declaration.name            = token.str;
+		ast->declaration.underlying_type = underlying_type;
+
+		token = shift(tokenizer, 1);
+
+		if (token.kind == static_cast<TokenKind>('['))
+		{
+			AST* array = reinterpret_cast<AST*>(malloc(sizeof(AST)));
+			*array = {};
+			array->type                  = ASTType::array;
+			array->array.underlying_type = underlying_type;
+
+			AST* capacity = reinterpret_cast<AST*>(malloc(sizeof(AST)));
+			*capacity = {};
+			capacity->type        = ASTType::tokens;
+			capacity->tokens.node = 0;
+
+			TokenNode** nil = &capacity->tokens.node;
+			for (token = shift(tokenizer, 1); token.kind != static_cast<TokenKind>(']'); token = shift(tokenizer, 1))
+			{
+				ASSERT(token.kind != TokenKind::null);
+				*nil = init_single_token_node(token);
+				nil  = &(*nil)->next;
+			}
+
+			array->array.capacity            = capacity;
+			ast->declaration.underlying_type = array;
+
+			token = shift(tokenizer, 1);
+		}
+
+		return ast;
 	}
 
 	free(ast);
@@ -714,9 +800,16 @@ internal void deinit_ast(AST* ast)
 				deinit_entire_ast_node(ast->container.declarations);
 			} break;
 
+			case ASTType::enumerator:
+			{
+				deinit_ast(ast->enumerator.underlying_type);
+				deinit_entire_ast_node(ast->enumerator.declarations);
+			} break;
+
 			case ASTType::declaration:
 			{
 				deinit_ast(ast->declaration.underlying_type);
+				deinit_ast(ast->declaration.assignment);
 			} break;
 
 			case ASTType::tokens:
@@ -836,6 +929,59 @@ int main()
 			}
 			else if (operation == STR_OF("enum"))
 			{
+				Tokenizer meta_tokenizer = main_tokenizer;
+				Token     meta_token     = main_token;
+
+				while (!(meta_token.kind == TokenKind::identifier && meta_token.str == STR_OF("enum")))
+				{
+					meta_token = shift(&meta_tokenizer, -1);
+					ASSERT(meta_token.kind != TokenKind::null);
+				}
+
+				AST* ast = init_ast(&meta_tokenizer);
+				DEFER { deinit_ast(ast); };
+
+				ASSERT(ast->type == ASTType::enumerator);
+				ASSERT(+ast->meta);
+				ASSERT(ast->enumerator.underlying_type->type == ASTType::root_type);
+
+				write(&file, STR_OF("global inline constexpr struct META_"));
+				write(&file, ast->enumerator.name);
+				write(&file, STR_OF("_t { "));
+				write(&file, ast->enumerator.name);
+				write(&file, STR_OF(" enumerator; "));
+				write(&file, ast->enumerator.underlying_type->root_type.name);
+				write(&file, STR_OF(" value; union { String str; struct { char PADDING_[offsetof(String, data)]; strlit cstr; }; }; "));
+				write(&file, ast->meta);
+				write(&file, STR_OF(" } META_"));
+				write(&file, ast->enumerator.name);
+				write(&file, STR_OF("[] =\n\t{\n"));
+
+				FOR_NODES(declaration, ast->enumerator.declarations)
+				{
+					write(&file, STR_OF("\t\t{ "));
+
+					write(&file, declaration->ast->declaration.name);
+					write(&file, STR_OF(", static_cast<"));
+					write(&file, ast->enumerator.underlying_type->root_type.name);
+					write(&file, STR_OF(">("));
+					write(&file, declaration->ast->declaration.name);
+					write(&file, STR_OF("), STR_OF(\""));
+					write(&file, declaration->ast->declaration.name);
+					write(&file, STR_OF("\"), "));
+
+					ASSERT(+declaration->ast->meta);
+					write(&file, declaration->ast->meta);
+
+					write(&file, STR_OF(" }"));
+					if (declaration->next)
+					{
+						write(&file, STR_OF(","));
+					}
+					write(&file, STR_OF("\n"));
+				}
+
+				write(&file, STR_OF("\t};"));
 			}
 			else
 			{

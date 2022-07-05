@@ -37,10 +37,6 @@ struct BMP
 	RGBA* rgba;
 };
 
-constexpr vf2 CARDINAL_VF2[4] = { { -1.0f, 0.0f }, { 1.0f, 0.0f }, { 0.0f, -1.0f, }, { 0.0f, 1.0f } };
-constexpr vi2 CARDINAL_VI2[4] = { { -1   , 0    }, { 1   , 0    }, { 0   , -1   , }, { 0   , 1    } };
-
-
 enum Cardinal : u8 // @META@ vf2 vf; vi2 vi;
 {
 	Cardinal_left,  // @META@ { -1.0f,  0.0f }, { -1,  0 }
@@ -48,7 +44,7 @@ enum Cardinal : u8 // @META@ vf2 vf; vi2 vi;
 	Cardinal_down,  // @META@ {  0.0f, -1.0f }, {  0, -1 }
 	Cardinal_up     // @META@ {  0.0f,  1.0f }, {  0,  1 }
 };
-#include "meta_temp/enum/Cardinal.temp.h"
+#include "meta/enum/Cardinal.h"
 
 struct Rock
 {
@@ -819,7 +815,7 @@ PlatformUpdate_t(PlatformUpdate)
 						.bmp_index   = rng(&state->seed, 0, ARRAY_CAPACITY(state->bmp.rocks)),
 						.chunk       = state->hero_chunk,
 						.rel_pos     = state->hero_rel_pos + vf3 { 0.0f, 0.0f, 1.0f },
-						.vel         = vxx(state->hero_vel.xy + CARDINAL_VF2[state->hero_cardinal] * 2.0f, 1.0f),
+						.vel         = vxx(state->hero_vel.xy + META_Cardinal[state->hero_cardinal].vf * 2.0f, 1.0f),
 						.existence_t = 1.0f
 					};
 				state->rock_count += 1;
