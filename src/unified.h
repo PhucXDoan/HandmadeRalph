@@ -225,15 +225,15 @@ template <typename TYPE>
 internal TYPE* pop_node(TYPE** node)
 {
 	TYPE* head = *node;
-	*node = (*node)->next_node;
+	*node = (*node)->next;
 	return head;
 }
 
 template <typename TYPE>
 internal void push_single_node(TYPE* head, TYPE** node)
 {
-	head->next_node = *node;
-	*node           = head;
+	head->next = *node;
+	*node      = head;
 }
 
 template <typename TYPE>
@@ -242,12 +242,12 @@ internal void push_entire_node(TYPE* head, TYPE** node)
 	if (head)
 	{
 		TYPE* last = head;
-		while (last->next_node)
+		while (last->next)
 		{
-			last = last->next_node;
+			last = last->next;
 		}
-		last->next_node = *node;
-		*node           = head;
+		last->next = *node;
+		*node      = head;
 	}
 }
 
@@ -255,9 +255,7 @@ internal void push_entire_node(TYPE* head, TYPE** node)
 // Memory.
 //
 
-#define memory_arena_checkpoint(ARENA)\
-u64 MACRO_CONCAT(MEMORY_ARENA_CHECKPOINT_, __LINE__) = (ARENA)->used;\
-DEFER { (ARENA)->used = MACRO_CONCAT(MEMORY_ARENA_CHECKPOINT_, __LINE__); }
+#define arena_checkpoint(ARENA) u64 MACRO_CONCAT(ARENA_CHECKPOINT_, __LINE__) = (ARENA)->used; DEFER { (ARENA)->used = MACRO_CONCAT(ARENA_CHECKPOINT_, __LINE__); };
 
 struct MemoryArena
 {
@@ -267,7 +265,7 @@ struct MemoryArena
 };
 
 template <typename TYPE>
-internal TYPE* memory_arena_allocate(MemoryArena* arena, const u64& count = 1)
+internal TYPE* allocate(MemoryArena* arena, const u64& count = 1)
 {
 	ASSERT(arena->used + sizeof(TYPE) * count <= arena->size);
 	byte* allocation = arena->base + arena->used;
@@ -276,7 +274,7 @@ internal TYPE* memory_arena_allocate(MemoryArena* arena, const u64& count = 1)
 }
 
 template <typename TYPE>
-internal TYPE* memory_arena_allocate_zero(MemoryArena* arena, const u64& count = 1)
+internal TYPE* allocate_zero(MemoryArena* arena, const u64& count = 1)
 {
 	ASSERT(arena->used + sizeof(TYPE) * count <= arena->size);
 	byte* allocation = arena->base + arena->used;
@@ -285,7 +283,7 @@ internal TYPE* memory_arena_allocate_zero(MemoryArena* arena, const u64& count =
 	return reinterpret_cast<TYPE*>(allocation);
 }
 
-internal MemoryArena memory_arena_reserve(MemoryArena* arena, const u64& size)
+internal MemoryArena allocate_arena(MemoryArena* arena, const u64& size)
 {
 	ASSERT(arena->used + size <= arena->size);
 	MemoryArena reservation;
@@ -297,17 +295,17 @@ internal MemoryArena memory_arena_reserve(MemoryArena* arena, const u64& size)
 }
 
 template <typename TYPE>
-internal TYPE* memory_arena_allocate_from_available(TYPE** available, MemoryArena* arena)
+internal TYPE* allocate_available(MemoryArena* arena, TYPE** available)
 {
 	if (*available)
 	{
 		TYPE* allocation = *available;
-		*available = (*available)->next_node;
+		*available = (*available)->next;
 		return allocation;
 	}
 	else
 	{
-		return memory_arena_allocate<TYPE>(arena);
+		return allocate<TYPE>(arena);
 	}
 }
 
@@ -561,7 +559,6 @@ internal constexpr vi3    vx3(const i32& n) { return { n, n, n    }; }
 internal constexpr vf4    vx4(const f32& n) { return { n, n, n, n }; }
 internal constexpr vi4    vx4(const i32& n) { return { n, n, n, n }; }
 
-
 template <typename TYPE>
 i32 sign(const TYPE& x)
 {
@@ -617,22 +614,6 @@ internal           f32 mod(const f32& x, const f32& m) { f32 y = fmodf(x, m); re
 
 internal f32 atan2(const vf2& v) { return atan2f(v.y, v.x); }
 
-#include <xmmintrin.h>
-
-global constexpr __m128 m_0   = {     0.0f,     0.0f,     0.0f,     0.0f };
-global constexpr __m128 m_1   = {     1.0f,     1.0f,     1.0f,     1.0f };
-global constexpr __m128 m_2   = {     2.0f,     2.0f,     2.0f,     2.0f };
-global constexpr __m128 m_3   = {     3.0f,     3.0f,     3.0f,     3.0f };
-global constexpr __m128 m_4   = {     4.0f,     4.0f,     4.0f,     4.0f };
-global constexpr __m128 m_8   = {     8.0f,     8.0f,     8.0f,     8.0f };
-global constexpr __m128 m_255 = {   255.0f,   255.0f,   255.0f,   255.0f };
-global constexpr __m128 m_inf = { INFINITY, INFINITY, INFINITY, INFINITY };
-
-internal __m128 square(const __m128& x                                  ) { return _mm_mul_ps(x, x); }
-internal __m128 cube  (const __m128& x                                  ) { return _mm_mul_ps(_mm_mul_ps(x, x), x); }
-internal __m128 lerp  (const __m128& a, const __m128& b, const __m128& t) { return _mm_add_ps(_mm_mul_ps(a, _mm_sub_ps(m_1, t)), _mm_mul_ps(b, t)); }
-internal __m128 clamp (const __m128& x, const __m128& a, const __m128& b) { return _mm_min_ps(_mm_max_ps(x, a), b); }
-
 struct RGBA
 {
 	union
@@ -670,6 +651,10 @@ internal constexpr RGBA  rgba_from(const f32& x, const f32& y, const f32& z     
 internal constexpr RGBA  rgba_from(const f32& x, const f32& y, const f32& z, const i32& w) { return { static_cast<u8>(x * 255.0f), static_cast<u8>(y * 255.0f), static_cast<u8>(z * 255.0f),  static_cast<u8>( w * 255.0f) }; }
 internal constexpr RGBA  rgba_from(const i32& x, const i32& y, const i32& z              ) { return { static_cast<u8>(x         ), static_cast<u8>(y         ), static_cast<u8>(z         )                                }; }
 internal constexpr RGBA  rgba_from(const i32& x, const i32& y, const i32& z, const i32& w) { return { static_cast<u8>(x         ), static_cast<u8>(y         ), static_cast<u8>(z         ),  static_cast<u8>( w         ) }; }
+
+//
+// Strings.
+//
 
 internal constexpr bool32 is_alpha(const char& c) { return IN_RANGE(c, 'a', 'z' + 1) || IN_RANGE(c, 'A', 'Z' + 1); }
 internal constexpr bool32 is_digit(const char& c) { return IN_RANGE(c, '0', '9' + 1); }
@@ -763,3 +748,82 @@ internal constexpr String trim_whitespace(const String& str)
 
 	return result;
 }
+
+struct StringBuilderCharBufferNode
+{
+	StringBuilderCharBufferNode* next;
+	i32                          count;
+	char                         buffer[4096];
+};
+
+struct StringBuilder
+{
+	MemoryArena*                 arena;
+	i32                          size;
+	StringBuilderCharBufferNode  head;
+	StringBuilderCharBufferNode* curr;
+};
+
+internal StringBuilder* init_string_builder(MemoryArena* arena)
+{
+	StringBuilder* builder = allocate<StringBuilder>(arena);
+	*builder = {};
+	builder->arena = arena;
+	builder->curr  = &builder->head;
+	return builder;
+}
+
+internal void build(StringBuilder* builder, char* buffer)
+{
+	i32 index = 0;
+	FOR_NODES(&builder->head)
+	{
+		memcpy(buffer + index, it->buffer, it->count);
+		index += it->count;
+	}
+}
+
+internal String build(StringBuilder* builder)
+{
+	char* data = allocate<char>(builder->arena, builder->size);
+	build(builder, data);
+	return { builder->size, data };
+}
+
+internal void append(StringBuilder* builder, const String& str)
+{
+	ASSERT(str.size > 0);
+	i32 left = str.size;
+
+	while (left)
+	{
+		if (builder->curr->count == ARRAY_CAPACITY(builder->curr->buffer))
+		{
+			builder->curr->next  = reinterpret_cast<StringBuilderCharBufferNode*>(malloc(sizeof(StringBuilderCharBufferNode)));
+			*builder->curr->next = {};
+			builder->curr        = builder->curr->next;
+		}
+
+		i32 amount = min(left, static_cast<i32>(ARRAY_CAPACITY(builder->curr->buffer) - builder->curr->count));
+		memcpy(builder->curr->buffer + builder->curr->count, str.data + str.size - left, amount);
+		builder->curr->count += amount;
+		left                 -= amount;
+	}
+
+	builder->size += str.size;
+}
+
+internal void append(StringBuilder* builder, strlit cstr)
+{
+	append(builder, { static_cast<i32>(strlen(cstr)), cstr });
+}
+
+template <typename... ARGUMENTS>
+internal void appendf(StringBuilder* builder, strlit format, ARGUMENTS... arguments)
+{
+	char buffer[4096];
+	i32  amount = sprintf_s(buffer, format, arguments...);
+	ASSERT(IN_RANGE(amount, 0, ARRAY_CAPACITY(buffer)));
+	append(builder, { amount, buffer });
+}
+

@@ -7,6 +7,11 @@
 #pragma warning(pop)
 #include <stdio.h>
 #include <stdlib.h>
+
+#define malloc(X) (DEBUG_ALLOCATION_COUNT += 1, malloc(X))
+#define free(X)   (DEBUG_ALLOCATION_COUNT -= 1, free(X))
+static int DEBUG_ALLOCATION_COUNT = 0;
+
 #include "unified.h"
 #undef  ASSERT
 #define ASSERT(EXPRESSION)\
@@ -22,9 +27,6 @@ do\
 }\
 while (false)
 
-#define malloc(X) (DEBUG_ALLOCATION_COUNT += 1, malloc(X))
-#define free(X)   (DEBUG_ALLOCATION_COUNT -= 1, free(X))
-global i32 DEBUG_ALLOCATION_COUNT = 0;
 
 struct File
 {
@@ -101,23 +103,6 @@ internal bool32 write(File* file, String str)
 {
 	DWORD bytes_written;
 	return file->handle && file->handle != INVALID_HANDLE_VALUE && WriteFile(file->handle, str.data, str.size, &bytes_written, 0) && bytes_written == str.size;
-}
-
-struct StringBuilder
-{
-	i32  count;
-	char buffer[4096];
-};
-
-template <typename... ARGUMENTS>
-internal void append(StringBuilder* builder, strlit format, ARGUMENTS... arguments)
-{
-	builder->count += sprintf_s(builder->buffer + builder->count, ARRAY_CAPACITY(builder->buffer) - builder->count, format, arguments...);
-}
-
-internal String build(StringBuilder* builder)
-{
-	return { builder->count, builder->buffer };
 }
 
 enum struct TokenKind : u8
@@ -832,6 +817,12 @@ int main()
 {
 	DEFER { ASSERT(DEBUG_ALLOCATION_COUNT == 0); };
 
+
+	MemoryArena main_arena = {};
+	main_arena.size = MEBIBYTES_OF(1);
+	main_arena.base = reinterpret_cast<byte*>(malloc(main_arena.size));
+	DEFER { free(main_arena.base); };
+
 	constexpr String INCLUDE_META_DIRECTIVE = STR_OF("include \"meta/");
 
 	Tokenizer main_tokenizer = init_tokenizer(SRC_DIR "HandmadeRalph.cpp");
@@ -839,6 +830,8 @@ int main()
 
 	while (true)
 	{
+		arena_checkpoint(&main_arena);
+
 		Token main_token = shift(&main_tokenizer, 0);
 
 		if (main_token.kind == TokenKind::null)
@@ -875,7 +868,7 @@ int main()
 				ASSERT(ast->container.type == ContainerType::a_union);
 				ASSERT(ast->container.declarations->ast->declaration.underlying_type->type == ASTType::container);
 
-				StringBuilder post_asserts = {};
+				StringBuilder* post_asserts = init_string_builder(&main_arena);
 
 				FOR_NODES(declaration, ast->container.declarations->ast->declaration.underlying_type->container.declarations)
 				{
@@ -908,24 +901,24 @@ int main()
 					write(&file, STR_OF("\n"));
 
 					// @TODO@ Check?
-					append(&post_asserts, "static_assert(");
+					appendf(post_asserts, "static_assert(");
 					if (declaration->ast->declaration.underlying_type->type == ASTType::array)
 					{
 						FOR_NODES(token, declaration->ast->declaration.underlying_type->array.capacity->tokens.node)
 						{
-							append(&post_asserts, "%.*s", PASS_STR(token->token.str));
+							appendf(post_asserts, "%.*s", PASS_STR(token->token.str));
 						}
 					}
 					else
 					{
-						append(&post_asserts, "1");
+						appendf(post_asserts, "1");
 					}
 
-					append(&post_asserts, " == %d);\n", count);
+					appendf(post_asserts, " == %d);\n", count);
 				}
 
 				ASSERT(write(&file, STR_OF("\t};\n")));
-				ASSERT(write(&file, build(&post_asserts)));
+				ASSERT(write(&file, build(post_asserts)));
 			}
 			else if (operation == STR_OF("enum"))
 			{

@@ -17,22 +17,22 @@ pushd W:\build\
 		goto ABORT
 	)
 
-	metaprogram.exe
-	if !ERRORLEVEL! neq 0 (
-		echo Metaprogram execution failed.
-		goto ABORT
-	)
+	REM metaprogram.exe
+	REM if !ERRORLEVEL! neq 0 (
+	REM 	echo Metaprogram execution failed.
+	REM 	goto ABORT
+	REM )
 
-	del *.pdb > NUL 2> NUL
-	echo 0 > LOCK.temp
-	cl %COMMON_COMPILER_FLAGS%  /LD                  W:\src\HandmadeRalph.cpp      /link %COMMON_LINKER_FLAGS% /PDB:HandmadeRalph_%RANDOM%.pdb /export:PlatformUpdate /export:PlatformSound
-	del LOCK.temp
+	REM del *.pdb > NUL 2> NUL
+	REM echo 0 > LOCK.temp
+	REM cl %COMMON_COMPILER_FLAGS%  /LD                  W:\src\HandmadeRalph.cpp      /link %COMMON_LINKER_FLAGS% /PDB:HandmadeRalph_%RANDOM%.pdb /export:PlatformUpdate /export:PlatformSound
+	REM del LOCK.temp
 
-	copy NUL HandmadeRalph.exe > NUL 2>&1
-	if !ERRORLEVEL! neq 0 (
-		goto ABORT
-	)
-	cl %COMMON_COMPILER_FLAGS% /FeHandmadeRalph.exe W:\src\HandmadeRalph_win32.cpp /link %COMMON_LINKER_FLAGS% /subsystem:windows user32.lib gdi32.lib winmm.lib dxgi.lib
+	REM copy NUL HandmadeRalph.exe > NUL 2>&1
+	REM if !ERRORLEVEL! neq 0 (
+	REM 	goto ABORT
+	REM )
+	REM cl %COMMON_COMPILER_FLAGS% /FeHandmadeRalph.exe W:\src\HandmadeRalph_win32.cpp /link %COMMON_LINKER_FLAGS% /subsystem:windows user32.lib gdi32.lib winmm.lib dxgi.lib
 
 	:ABORT
 	del *.obj *.lib *.exp > NUL 2> NUL
