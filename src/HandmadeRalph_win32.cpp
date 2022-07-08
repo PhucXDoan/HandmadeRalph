@@ -13,10 +13,10 @@
 
 #define PROCESS_PLATFORM_BUTTON(BUTTON, IS_DOWN) MACRO_CONCAT(g_platform_input.button, BUTTON) = static_cast<u8>(((MACRO_CONCAT(g_platform_input.button, BUTTON) + ((MACRO_CONCAT(g_platform_input.button, BUTTON) >> 7) != static_cast<bool8>(IS_DOWN))) & 0b01111111) | ((IS_DOWN) << 7))
 
-#define  XInputGetState_t(NAME) DWORD NAME(DWORD dwUserIndex, XINPUT_STATE *pState)
-typedef  XInputGetState_t(XInputGetState_t);
-internal XInputGetState_t(stub_XInputGetState) { return ERROR_DEVICE_NOT_CONNECTED; }
-global   XInputGetState_t* g_XInputGetState = stub_XInputGetState;
+#define   XInputGetState_t(NAME) DWORD NAME(DWORD dwUserIndex, XINPUT_STATE *pState)
+typedef   XInputGetState_t(XInputGetState_t);
+procedure XInputGetState_t(stub_XInputGetState) { return ERROR_DEVICE_NOT_CONNECTED; }
+global    XInputGetState_t* g_XInputGetState = stub_XInputGetState;
 
 global vi2           g_client_dims                   = { 0, 0 };
 global PlatformInput g_platform_input                = {};
@@ -38,7 +38,7 @@ struct Hotloader
 	PlatformSound_t*  PlatformSound;
 };
 
-internal Hotloader DEBUG_hotload()
+procedure Hotloader DEBUG_hotload()
 {
 	Hotloader hotloader;
 
@@ -70,10 +70,18 @@ internal Hotloader DEBUG_hotload()
 
 PlatformReadFileData_t(PlatformReadFileData)
 {
-	HANDLE handle = CreateFileW(platform_file_path, GENERIC_READ, FILE_SHARE_READ, 0, OPEN_EXISTING, 0, 0);
+	wchar_t wide_file_path[256];
+	u64     wide_file_path_count;
+	if (mbstowcs_s(&wide_file_path_count, wide_file_path, platform_file_path.data, platform_file_path.size) || wide_file_path_count != platform_file_path.size + 1)
+	{
+		DEBUG_printf(__FILE__ " :: " __FUNCTION__ " :: Failed to convert file path `%S` to wide string.\n", wide_file_path);
+		return {};
+	}
+
+	HANDLE handle = CreateFileW(wide_file_path, GENERIC_READ, FILE_SHARE_READ, 0, OPEN_EXISTING, 0, 0);
 	if (handle == INVALID_HANDLE_VALUE)
 	{
-		DEBUG_printf(__FILE__ " :: " __FUNCTION__ " :: Failed to open file `%S` for reading.\n", platform_file_path);
+		DEBUG_printf(__FILE__ " :: " __FUNCTION__ " :: Failed to open file `%S` for reading.\n", wide_file_path);
 		return {};
 	}
 	DEFER { CloseHandle(handle); };
@@ -81,40 +89,40 @@ PlatformReadFileData_t(PlatformReadFileData)
 	LARGE_INTEGER file_size;
 	if (!GetFileSizeEx(handle, &file_size))
 	{
-		DEBUG_printf(__FILE__ " :: " __FUNCTION__ " :: Failed to get size of `%S`.\n", platform_file_path);
+		DEBUG_printf(__FILE__ " :: " __FUNCTION__ " :: Failed to get size of `%S`.\n", wide_file_path);
 		return {};
 	}
 
 	PlatformFileData platform_file_data =
 		{
 			.size = static_cast<u64>(file_size.QuadPart),
-			.data = reinterpret_cast<byte*>(VirtualAlloc(0, file_size.QuadPart, MEM_COMMIT, PAGE_READWRITE))
+			.data = reinterpret_cast<byte*>(VirtualAlloc(0, static_cast<SIZE_T>(file_size.QuadPart), MEM_COMMIT, PAGE_READWRITE))
 		};
 
 	// @TODO@ Larger file sizes.
 	if (platform_file_data.size > 0xFFFFFFFF)
 	{
-		DEBUG_printf(__FILE__ " :: " __FUNCTION__ " :: File `%S` is too big (`%zu` bytes); must be less than 2^32 bytes (4.29GB).\n", platform_file_path, platform_file_data.size);
+		DEBUG_printf(__FILE__ " :: " __FUNCTION__ " :: File `%S` is too big (`%zu` bytes); must be less than 2^32 bytes (4.29GB).\n", wide_file_path, platform_file_data.size);
 		return {};
 	}
 
 	if (!platform_file_data.data)
 	{
-		DEBUG_printf(__FILE__ " :: " __FUNCTION__ " :: Failed to allocate `%zu` bytes for `%S`.\n", platform_file_data.size, platform_file_path);
+		DEBUG_printf(__FILE__ " :: " __FUNCTION__ " :: Failed to allocate `%zu` bytes for `%S`.\n", platform_file_data.size, wide_file_path);
 		return {};
 	}
 
 	DWORD read_size;
 	if (!ReadFile(handle, platform_file_data.data, static_cast<u32>(platform_file_data.size), &read_size, 0))
 	{
-		DEBUG_printf(__FILE__ " :: " __FUNCTION__ " :: Failed to read file `%S`.\n", platform_file_path);
+		DEBUG_printf(__FILE__ " :: " __FUNCTION__ " :: Failed to read file `%S`.\n", wide_file_path);
 		VirtualFree(platform_file_data.data, 0, MEM_RELEASE);
 		return {};
 	}
 
 	if (read_size != platform_file_data.size)
 	{
-		DEBUG_printf(__FILE__ " :: " __FUNCTION__ " :: Incomplete read of `%ld` out of `%zu` bytes of `%S`.\n", read_size, platform_file_data.size, platform_file_path);
+		DEBUG_printf(__FILE__ " :: " __FUNCTION__ " :: Incomplete read of `%ld` out of `%zu` bytes of `%S`.\n", read_size, platform_file_data.size, wide_file_path);
 		VirtualFree(platform_file_data.data, 0, MEM_RELEASE);
 		return {};
 	}
@@ -132,10 +140,18 @@ PlatformFreeFileData_t(PlatformFreeFileData)
 
 PlatformWriteFile_t(PlatformWriteFile)
 {
-	HANDLE handle = CreateFileW(platform_file_path, GENERIC_WRITE, 0, 0, CREATE_ALWAYS, 0, 0);
+	wchar_t wide_file_path[256];
+	u64     wide_file_path_count;
+	if (mbstowcs_s(&wide_file_path_count, wide_file_path, platform_file_path.data, platform_file_path.size) || wide_file_path_count != platform_file_path.size + 1)
+	{
+		DEBUG_printf(__FILE__ " :: " __FUNCTION__ " :: Failed to convert file path `%S` to wide string.\n", wide_file_path);
+		return {};
+	}
+
+	HANDLE handle = CreateFileW(wide_file_path, GENERIC_WRITE, 0, 0, CREATE_ALWAYS, 0, 0);
 	if (handle == INVALID_HANDLE_VALUE)
 	{
-		DEBUG_printf(__FILE__ " :: " __FUNCTION__ " :: Failed to open file `%S` for writing.\n", platform_file_path);
+		DEBUG_printf(__FILE__ " :: " __FUNCTION__ " :: Failed to open file `%S` for writing.\n", wide_file_path);
 		return false;
 	}
 	DEFER { CloseHandle(handle); };
@@ -143,39 +159,39 @@ PlatformWriteFile_t(PlatformWriteFile)
 	// @TODO@ Larger file sizes.
 	if (platform_write_size > 0xFFFFFFFF)
 	{
-		DEBUG_printf(__FILE__ " :: " __FUNCTION__ " :: `%zu` bytes is too big to write out to `%S`; must be less than 2^32 bytes (4.29GB).\n", platform_write_size, platform_file_path);
+		DEBUG_printf(__FILE__ " :: " __FUNCTION__ " :: `%zu` bytes is too big to write out to `%S`; must be less than 2^32 bytes (4.29GB).\n", platform_write_size, wide_file_path);
 		return false;
 	}
 
 	DWORD write_size;
 	if (!WriteFile(handle, platform_write_data, static_cast<u32>(platform_write_size), &write_size, 0))
 	{
-		DEBUG_printf(__FILE__ " :: " __FUNCTION__ " :: Failed to write into `%S`.\n", platform_file_path);
+		DEBUG_printf(__FILE__ " :: " __FUNCTION__ " :: Failed to write into `%S`.\n", wide_file_path);
 		return false;
 	}
 
 	if (write_size != platform_write_size)
 	{
-		DEBUG_printf(__FILE__ " :: " __FUNCTION__ " :: Incomplete write of `%ld` out of `%zu` bytes to `%S`.\n", write_size, platform_write_size, platform_file_path);
+		DEBUG_printf(__FILE__ " :: " __FUNCTION__ " :: Incomplete write of `%ld` out of `%zu` bytes to `%S`.\n", write_size, platform_write_size, wide_file_path);
 		return false;
 	}
 
 	return true;
 }
 
-internal i64 query_performance_counter(void)
+procedure i64 query_performance_counter(void)
 {
 	LARGE_INTEGER n;
 	QueryPerformanceCounter(&n);
 	return n.QuadPart;
 }
 
-internal f32 calc_performance_counter_delta_time(i64 start, i64 end)
+procedure f32 calc_performance_counter_delta_time(i64 start, i64 end)
 {
 	return static_cast<f32>(end - start) / g_performance_counter_frequency;
 }
 
-internal LRESULT window_procedure_callback(HWND window, UINT message, WPARAM wparam, LPARAM lparam)
+procedure LRESULT window_procedure_callback(HWND window, UINT message, WPARAM wparam, LPARAM lparam)
 {
 	switch (message)
 	{
@@ -976,19 +992,6 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int cmd_show)
 
 		dxgi_output->WaitForVBlank();
 		update_countdown -= calc_performance_counter_delta_time(performance_counter_start, query_performance_counter());
-
-		#if 0
-		{ // @NOTE@ For getting all Windows error. Some errors are the result of successful operations and therefore false positives.
-			DWORD last_error = GetLastError();
-			if (last_error)
-			{
-				wchar_t* buffer;
-				ASSERT(FormatMessageW(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM, 0, last_error, 0, reinterpret_cast<wchar_t*>(&buffer), 0, 0));
-				DEBUG_printf(__FILE__ " :: Latest Windows error (Code `%lu`).\n\t%S", last_error, buffer);
-				LocalFree(buffer);
-			}
-		}
-		#endif
 	}
 	BREAK:;
 

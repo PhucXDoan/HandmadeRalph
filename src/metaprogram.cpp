@@ -1,130 +1,647 @@
-#undef UNICODE
 #define UNICODE true
-#pragma warning(push)
-#pragma warning(disable : 5039 4820 4061 4365)
+#define TokenType TokenType_
 #include <windows.h>
 #include <shlobj_core.h>
-#pragma warning(pop)
-#include <stdio.h>
-#include <stdlib.h>
-
-#define malloc(X) (DEBUG_ALLOCATION_COUNT += 1, malloc(X))
-#define free(X)   (DEBUG_ALLOCATION_COUNT -= 1, free(X))
-static int DEBUG_ALLOCATION_COUNT = 0;
-
+#undef TokenType
 #include "unified.h"
-#undef  ASSERT
+#undef ASSERT
 #define ASSERT(EXPRESSION)\
 do\
 {\
 	if (!(EXPRESSION))\
 	{\
-		printf(__FILE__ " (`" MACRO_STRINGIFY(__LINE__) "`) :: Internal error. Failed assertion. :: `"  #EXPRESSION "`.\n");\
-		DEBUG_printf(__FILE__ " (`" MACRO_STRINGIFY(__LINE__) "`) :: Internal error. Failed assertion. :: `"  #EXPRESSION "`.\n");\
-		*reinterpret_cast<i32*>(0) = 0;\
-		exit(1);\
+		printf(__FILE__ " (" MACRO_STRINGIFY(__LINE__) ") :: Internal error. Assertion fired : `" #EXPRESSION "`\n");\
+		*reinterpret_cast<byte*>(0) = 0;\
 	}\
 }\
 while (false)
 
-
-struct File
+procedure bool32 write(String file_path, String content)
 {
-	HANDLE handle;
+	wchar_t wide_file_path[256];
+	u64     wide_file_path_count;
+	if (mbstowcs_s(&wide_file_path_count, wide_file_path, file_path.data, file_path.size) || wide_file_path_count != file_path.size + 1)
+	{
+		return false;
+	}
+
+	wchar_t dir_path_buffer[256] = {};
+	FOR_ELEMS_REV(scan_c, wide_file_path, static_cast<i32>(file_path.size))
+	{
+		if (*scan_c == L'/' || *scan_c == L'\\')
+		{
+			FOR_ELEMS(copy_c, wide_file_path, scan_c_index)
+			{
+				dir_path_buffer[copy_c_index] =
+					*copy_c == L'/'
+						? L'\\'
+						: *copy_c;
+			}
+			break;
+		}
+	}
+
+	{
+		i32 err = SHCreateDirectoryExW(0, dir_path_buffer, 0);
+		if (err != ERROR_SUCCESS && err != ERROR_ALREADY_EXISTS)
+		{
+			return false;
+		}
+	}
+
+	HANDLE handle = CreateFileW(wide_file_path, GENERIC_WRITE, 0, 0, CREATE_ALWAYS, 0, 0);
+	if (handle == INVALID_HANDLE_VALUE)
+	{
+		return false;
+	}
+	DEFER { CloseHandle(handle); };
+
+	DWORD write_amount;
+	return content.size < (1ULL << 32) && WriteFile(handle, content.data, static_cast<DWORD>(content.size), &write_amount, 0) && write_amount == content.size;
+}
+
+struct StringBuilderCharBufferNode
+{
+	StringBuilderCharBufferNode* next;
+	u64  count;
+	char buffer[4096];
 };
 
-internal File init_file(String file_path)
+struct StringBuilder
 {
-	File file = { .handle = INVALID_HANDLE_VALUE };
+	MemoryArena*                 arena;
+	u64                          size;
+	StringBuilderCharBufferNode  head;
+	StringBuilderCharBufferNode* curr;
+};
 
-	char buffer[256];
-	i32 length = sprintf_s(buffer, SRC_DIR "%.*s", PASS_STR(file_path));
-	ASSERT(length == static_cast<i32>(sizeof(SRC_DIR) - 1 + file_path.size));
+procedure StringBuilder* init_string_builder(MemoryArena* arena)
+{
+	StringBuilder* builder = allocate<StringBuilder>(arena);
+	*builder       = {};
+	builder->arena = arena;
+	builder->curr  = &builder->head;
 
-	size_t newsize = length + 1;
-
-	wchar_t wcstring[256];
-
-	size_t convertedChars = 0;
-	errno_t result = mbstowcs_s(&convertedChars, wcstring, newsize, buffer, _TRUNCATE);
-	ASSERT(result != EINVAL);
-
-	{
-		wchar_t dir[256];
-
-		i32 last_slash = 0;
-		FOR_ELEMS_REV(c, wcstring, newsize)
-		{
-			// @TODO@ Backslashes?
-			if (*c == L'/')
-			{
-				last_slash = c_index;
-				break;
-			}
-		}
-		FOR_ELEMS(c, wcstring, last_slash)
-		{
-			if (*c == L'/')
-			{
-				dir[c_index] = L'\\';
-			}
-			else
-			{
-				dir[c_index] = *c;
-			}
-		}
-		dir[last_slash] = L'\0';
-
-		i32 result = SHCreateDirectoryExW(0, dir, 0);
-		if (result != ERROR_SUCCESS && result != ERROR_SUCCESS && result != ERROR_ALREADY_EXISTS)
-		{
-			ASSERT(!"Failed to make directory");
-		}
-	}
-
-	file.handle = CreateFileW(wcstring, GENERIC_WRITE, 0, 0, CREATE_ALWAYS, 0, 0);
-	if (file.handle == INVALID_HANDLE_VALUE)
-	{
-		ASSERT(!"Failed to make file");
-	}
-
-	return file;
+	return builder;
 }
 
-internal void deinit_file(File* file)
+procedure void append(StringBuilder* builder, String str)
 {
-	if (!CloseHandle(file->handle))
+	u64 index = 0;
+	while (index < str.size)
 	{
-		ASSERT(!"Failed to close");
+		if (builder->curr->count == ARRAY_CAPACITY(builder->curr->buffer))
+		{
+			if (!builder->curr->next)
+			{
+				builder->curr->next = allocate<StringBuilderCharBufferNode>(builder->arena);
+			}
+			builder->curr  = builder->curr->next;
+			*builder->curr = {};
+		}
+
+		u64 write_amount = min(str.size - index, ARRAY_CAPACITY(builder->curr->buffer) - builder->curr->count);
+		memcpy(builder->curr->buffer + builder->curr->count, str.data + index, write_amount);
+		builder->curr->count += write_amount;
+		builder->size        += write_amount;
+		index                += write_amount;
 	}
 }
 
-internal bool32 write(File* file, String str)
+procedure void append(StringBuilder* builder, StringBuilder* post)
 {
-	DWORD bytes_written;
-	return file->handle && file->handle != INVALID_HANDLE_VALUE && WriteFile(file->handle, str.data, str.size, &bytes_written, 0) && bytes_written == str.size;
+	for (StringBuilderCharBufferNode* it = &post->head; it && it->count; it = it->next)
+	{
+		append(builder, { it->count, it->buffer });
+	}
 }
 
-enum struct TokenKind : u8
+#define appendf(BUILDER, FORMAT, ...)\
+do\
+{\
+	char APPENDF_BUFFER_[4096];\
+	i32 APPENDF_WRITE_AMOUNT_ = sprintf_s(APPENDF_BUFFER_, ARRAY_CAPACITY(APPENDF_BUFFER_), (FORMAT), __VA_ARGS__);\
+	ASSERT(IN_RANGE(APPENDF_WRITE_AMOUNT_, 0, ARRAY_CAPACITY(APPENDF_BUFFER_)));\
+	append((BUILDER), { static_cast<u64>(APPENDF_WRITE_AMOUNT_), APPENDF_BUFFER_ });\
+}\
+while (false)
+
+procedure String flush(StringBuilder* builder)
+{
+	char* data = allocate<char>(builder->arena, builder->size);
+
+	u64 write_count = 0;
+	FOR_NODES(&builder->head)
+	{
+		memcpy(data + write_count, it->buffer, it->count);
+		write_count += it->count;
+	}
+
+	String result = { builder->size, data };
+
+	builder->size       = 0;
+	builder->head.count = 0;
+	builder->curr       = &builder->head;
+
+	return result;
+}
+
+enum struct TokenType : u8
 {
 	null,
-
-	// @NOTE@ ASCII characters 0-127.
-
-	meta = 128,
+	meta,
 	preprocessor,
+	reserved,
 	identifier,
 	number,
 	string,
 	character
 };
 
-// @TODO@ Compact this?
+enum struct ReservedType : u8
+{
+	null,
+
+	// @NOTE@ ASCII characters.
+
+	MULTIBYTE_START  = 127,
+	MULTIBYTE_START_ = MULTIBYTE_START - 1,
+	a_struct,
+	a_union,
+	a_enum,
+	a_constexpr,
+	a_template,
+	a_if,
+	a_else,
+	a_while,
+	a_do,
+	a_for,
+	a_switch,
+	a_case,
+	a_break,
+	a_default,
+	a_sizeof,
+	plus_2,
+	plus_equal,
+	sub_2,
+	sub_equal,
+	asterisk_equal,
+	slash_equal,
+	pipe_2,
+	pipe_equal,
+	ampersand_2,
+	ampersand_equal,
+	less_than_equal,
+	greater_than_equal,
+	equal_2,
+	exclamation_equal,
+	less_than_2,
+	greater_than_2,
+	less_than_2_equal,
+	greater_than_2_equal,
+	caret_equal,
+	percent_equal,
+	colon_2,
+	sub_greater_than
+};
+
+constexpr String RESERVED_STRINGS[] =
+	{
+		String("struct"),
+		String("union"),
+		String("enum"),
+		String("constexpr"),
+		String("template"),
+		String("if"),
+		String("else"),
+		String("while"),
+		String("do"),
+		String("for"),
+		String("switch"),
+		String("case"),
+		String("break"),
+		String("default"),
+		String("sizeof"),
+		String("++"),
+		String("+="),
+		String("--"),
+		String("-="),
+		String("*="),
+		String("/="),
+		String("||"),
+		String("|="),
+		String("&&"),
+		String("&="),
+		String("<="),
+		String(">="),
+		String("=="),
+		String("!="),
+		String("<<"),
+		String(">>"),
+		String("<<="),
+		String(">>="),
+		String("^="),
+		String("%="),
+		String("::"),
+		String("->")
+	};
+
 struct Token
 {
-	TokenKind kind;
-	String    str;
+	TokenType type;
+	String    text;
+	i32       line_index;
+
+	union
+	{
+		struct
+		{
+			String info;
+		} meta;
+
+		struct
+		{
+			ReservedType type;
+		} reserved;
+	};
 };
+
+struct TokenBufferNode
+{
+	TokenBufferNode* next;
+	TokenBufferNode* prev;
+	u64              count;
+	Token            buffer[4096];
+};
+
+struct Tokenizer
+{
+	String           file_path;
+	u64              file_size;
+	char*            file_data;
+	i32              curr_index_in_node;
+	TokenBufferNode* curr_node;
+};
+
+procedure Tokenizer init_tokenizer(String file_path, MemoryArena* arena)
+{
+	Tokenizer tokenizer =
+		{
+			.file_path = file_path
+		};
+
+	{
+		HANDLE handle;
+		wchar_t wide_file_path[256];
+		u64     wide_file_path_count;
+		if (mbstowcs_s(&wide_file_path_count, wide_file_path, file_path.data, file_path.size) || wide_file_path_count != file_path.size + 1)
+		{
+			return {};
+		}
+
+		handle = CreateFileW(wide_file_path, GENERIC_READ, 0, 0, OPEN_EXISTING, 0, 0);
+		if (handle == INVALID_HANDLE_VALUE)
+		{
+			return {};
+		}
+		DEFER { CloseHandle(handle); };
+
+		LARGE_INTEGER file_size;
+		if (!GetFileSizeEx(handle, &file_size))
+		{
+			return {};
+		}
+
+		tokenizer.file_size = static_cast<u64>(file_size.QuadPart);
+		tokenizer.file_data = allocate<char>(arena, tokenizer.file_size);
+
+		DWORD write_amount;
+		if (tokenizer.file_size >= (1ULL << 32) || !ReadFile(handle, tokenizer.file_data, static_cast<DWORD>(tokenizer.file_size), &write_amount, 0) || write_amount != tokenizer.file_size)
+		{
+			return {};
+		}
+	}
+
+	tokenizer.curr_node = allocate<TokenBufferNode>(arena);
+	*tokenizer.curr_node = {};
+
+	TokenBufferNode* head = tokenizer.curr_node;
+
+	char* curr_read         = tokenizer.file_data;
+	i32   curr_line_index   = 0;
+	while (curr_read < tokenizer.file_data + tokenizer.file_size)
+	{
+		Token token =
+			{
+				.text       = { 0, curr_read },
+				.line_index = curr_line_index,
+			};
+
+		lambda peek_read =
+			[&](i32 offset)
+			{
+				if (IN_RANGE(curr_read + offset, tokenizer.file_data, tokenizer.file_data + tokenizer.file_size))
+				{
+					return curr_read[offset];
+				}
+				else
+				{
+					return '\0';
+				}
+			};
+
+		lambda inc =
+			[&](u64 offset)
+			{
+				offset = min(offset, static_cast<u64>(tokenizer.file_data + tokenizer.file_size - curr_read));
+				FOR_RANGE(static_cast<i32>(offset))
+				{
+					if (curr_read[0] == '\n')
+					{
+						curr_line_index += 1;
+					}
+					curr_read       += 1;
+					token.text.size += 1;
+				}
+			};
+
+		if (peek_read(0) == ' ' || is_whitespace(peek_read(0)))
+		{
+			inc(1);
+		}
+		else if (peek_read(0) == '/' && peek_read(1) == '*')
+		{
+			while (peek_read(0) && !(peek_read(-2) == '*' && peek_read(-1) == '/'))
+			{
+				inc(1);
+			}
+		}
+		else if (peek_read(0) == '/' && peek_read(1) == '/')
+		{
+			inc(2);
+
+			while (peek_read(0) && (peek_read(0) == ' ' || peek_read(0) == '\t'))
+			{
+				inc(1);
+			}
+
+			String comment = { 0, curr_read };
+
+			while (peek_read(0) && peek_read(0) != '\r' && peek_read(0) != '\n')
+			{
+				comment.size += 1;
+				inc(1);
+			}
+
+			if (starts_with(comment, String("@META@")))
+			{
+				token.type = TokenType::meta;
+
+				while (token.text.size && is_whitespace(token.text.data[token.text.size - 1]))
+				{
+					token.text.size -= 1;
+				}
+
+				token.meta.info = trim(comment, String("@META@").size);
+				while (token.meta.info.size && is_whitespace(token.meta.info.data[0]))
+				{
+					token.meta.info = trim(token.meta.info, 1);
+				}
+			}
+		}
+		else if (peek_read(0) == '#')
+		{
+			inc(1);
+			token.type = TokenType::preprocessor;
+
+			bool32 escaped = false;
+			while (peek_read(0) && IMPLIES(!escaped, peek_read(0) != '\n'))
+			{
+				if (peek_read(0) == '\\')
+				{
+					escaped = !escaped;
+				}
+				else if (peek_read(0) != '\r')
+				{
+					escaped = false;
+				}
+				inc(1);
+			}
+
+			while (token.text.size && is_whitespace(token.text.data[token.text.size - 1]))
+			{
+				token.text.size -= 1;
+			}
+		}
+		else if (is_alpha(peek_read(0)) || peek_read(0) == '_')
+		{
+			token.type = TokenType::identifier;
+
+			inc(1);
+			while (is_alpha(peek_read(0)) || is_digit(peek_read(0)) || peek_read(0) == '_')
+			{
+				inc(1);
+			}
+
+			FOR_ELEMS(RESERVED_STRINGS)
+			{
+				if (*it == token.text)
+				{
+					token.type          = TokenType::reserved;
+					token.reserved.type = static_cast<ReservedType>(static_cast<i32>(ReservedType::MULTIBYTE_START) + it_index);
+					break;
+				}
+			}
+		}
+		else if (is_digit(peek_read(0)) || peek_read(0) == '.' && is_digit(peek_read(1)))
+		{
+			// @TODO@ Proper handling of suffixes, prefixes, and decimals.
+			token.type = TokenType::number;
+
+			inc(1);
+			while (is_alpha(peek_read(0)) || is_digit(peek_read(0)) || peek_read(0) == '.' || peek_read(0) == '\'')
+			{
+				inc(1);
+			}
+		}
+		else if (peek_read(0) == '"')
+		{
+			inc(1);
+			token.type = TokenType::string;
+
+			bool32 escaped = false;
+			while (peek_read(0) && IMPLIES(!escaped, peek_read(0) != '"' && peek_read(0) != '\r' && peek_read(0) != '\n'))
+			{
+				if (peek_read(0) == '\\')
+				{
+					escaped = !escaped;
+				}
+				else if (peek_read(0) != '\r')
+				{
+					escaped = false;
+				}
+				inc(1);
+			}
+
+			// @TODO@ Report that there is an unclosed string literal.
+
+			if (peek_read(0) == '"')
+			{
+				inc(0);
+			}
+		}
+		else if (peek_read(0) == '\'')
+		{
+			token.type = TokenType::character;
+
+			inc(1);
+			if (peek_read(0) == '\\')
+			{
+				inc(1);
+			}
+
+			if (peek_read(0) == '\'')
+			{
+				inc(1);
+			}
+		}
+		else
+		{
+			token.type = TokenType::reserved;
+
+			FOR_ELEMS(RESERVED_STRINGS)
+			{
+				if (curr_read + it->size <= tokenizer.file_data + tokenizer.file_size && String { it->size, curr_read } == *it)
+				{
+					token.reserved.type = static_cast<ReservedType>(static_cast<i32>(ReservedType::MULTIBYTE_START) + it_index);
+					inc(it->size);
+					goto BREAK;
+				}
+			}
+			{
+				token.reserved.type = static_cast<ReservedType>(peek_read(0));
+				inc(1);
+			}
+			BREAK:;
+		}
+
+		if (token.type != TokenType::null)
+		{
+			if (tokenizer.curr_node->count == ARRAY_CAPACITY(tokenizer.curr_node->buffer))
+			{
+				tokenizer.curr_node->next       = allocate<TokenBufferNode>(arena);
+				*tokenizer.curr_node->next      = {};
+				tokenizer.curr_node->next->prev = tokenizer.curr_node;
+				tokenizer.curr_node             = tokenizer.curr_node->next;
+			}
+
+			tokenizer.curr_node->buffer[tokenizer.curr_node->count] = token;
+			tokenizer.curr_node->count += 1;
+		}
+	}
+
+	tokenizer.curr_node = head;
+
+	return tokenizer;
+}
+
+procedure bool32 is_reserved(Token token, ReservedType type)
+{
+	return token.type == TokenType::reserved && token.reserved.type == type;
+}
+
+procedure bool32 is_reserved(Token token, char type)
+{
+	return token.type == TokenType::reserved && token.reserved.type == static_cast<ReservedType>(type);
+}
+
+procedure Token shift(Tokenizer* tokenizer, i32 offset)
+{
+	i32 remaining = offset;
+	i32 step      = sign(offset);
+
+	while (remaining)
+	{
+		tokenizer->curr_index_in_node += step;
+		if (tokenizer->curr_index_in_node < 0)
+		{
+			if (tokenizer->curr_node->prev)
+			{
+				ASSERT(tokenizer->curr_node->prev->count == ARRAY_CAPACITY(tokenizer->curr_node->prev->buffer));
+				tokenizer->curr_node          = tokenizer->curr_node->prev;
+				tokenizer->curr_index_in_node = ARRAY_CAPACITY(tokenizer->curr_node->buffer) - 1;
+			}
+			else
+			{
+				tokenizer->curr_index_in_node = 0;
+				return {};
+			}
+		}
+		else if (static_cast<u64>(tokenizer->curr_index_in_node) >= tokenizer->curr_node->count)
+		{
+			if (tokenizer->curr_node->next)
+			{
+				ASSERT(tokenizer->curr_node->count == ARRAY_CAPACITY(tokenizer->curr_node->buffer));
+				tokenizer->curr_node          = tokenizer->curr_node->next;
+				tokenizer->curr_index_in_node = 0;
+			}
+			else
+			{
+				ASSERT(tokenizer->curr_node->count);
+				tokenizer->curr_index_in_node = static_cast<i32>(tokenizer->curr_node->count) - 1;
+				return {};
+			}
+		}
+
+		remaining -= step;
+	}
+
+	return tokenizer->curr_node->buffer[tokenizer->curr_index_in_node];
+}
+
+procedure void report(String message, Tokenizer* tokenizer)
+{
+	Token reported_token = shift(tokenizer, 0);
+
+	String line;
+	{
+		Tokenizer scan_tokenizer = *tokenizer;
+		while (true)
+		{
+			Token curr_token = shift(&scan_tokenizer,  0);
+			Token prev_token = shift(&scan_tokenizer, -1);
+			if (prev_token.type == TokenType::null || prev_token.line_index != curr_token.line_index)
+			{
+				line.data = curr_token.text.data;
+				break;
+			}
+		}
+	}
+	{
+		Tokenizer scan_tokenizer = *tokenizer;
+		while (true)
+		{
+			Token curr_token = shift(&scan_tokenizer, 0);
+			Token next_token = shift(&scan_tokenizer, 1);
+			if (next_token.type == TokenType::null || next_token.line_index != curr_token.line_index)
+			{
+				line.size = static_cast<u64>(curr_token.text.data + curr_token.text.size - line.data);
+				break;
+			}
+		}
+	}
+
+	printf(":: (%d) %.*s : %.*s\n", reported_token.line_index + 1, PASS_ISTR(tokenizer->file_path), PASS_ISTR(message));
+	printf(":: `%.*s`\n", PASS_ISTR(line));
+
+	ASSERT(reported_token.text.data >= line.data);
+	printf("::  %*s", static_cast<i32>(reported_token.text.data - line.data), "");
+	FOR_RANGE(static_cast<i32>(reported_token.text.size))
+	{
+		printf("~");
+	}
+	printf("\n");
+}
 
 struct TokenNode
 {
@@ -132,348 +649,24 @@ struct TokenNode
 	Token      token;
 };
 
-struct TokenBufferNode
-{
-	TokenBufferNode* prev;
-	TokenBufferNode* next;
-	i32              count;
-	Token            buffer[4096];
-};
-
-struct Tokenizer
-{
-	i32              curr_token_index;
-	TokenBufferNode* curr_token_buffer_node;
-	i32              file_size;
-	char*            file_data;
-};
-
-internal Tokenizer init_tokenizer(strlit file_path)
-{
-	Tokenizer tokenizer = {};
-
-	FILE* file = 0;
-	ASSERT(fopen_s(&file, file_path, "rb") != EINVAL); // @TODO@ Handle error.
-	ASSERT(file);
-	DEFER { fclose(file); };
-
-	fseek(file, 0, SEEK_END);
-	tokenizer.file_size = ftell(file);
-	tokenizer.file_data = reinterpret_cast<char*>(malloc(static_cast<size_t>(tokenizer.file_size)));
-	fseek(file, 0, SEEK_SET);
-	fread(tokenizer.file_data, sizeof(char), static_cast<size_t>(tokenizer.file_size), file);
-
-	tokenizer.curr_token_buffer_node  = reinterpret_cast<TokenBufferNode*>(malloc(sizeof(TokenBufferNode)));
-	*tokenizer.curr_token_buffer_node = {};
-
-	{
-		TokenBufferNode* curr_node           = tokenizer.curr_token_buffer_node;
-		bool32           can_be_preprocessor = true;
-		char*            curr_read           = tokenizer.file_data;
-		char*            read_eof            = tokenizer.file_data + tokenizer.file_size;
-		while (curr_read < read_eof)
-		{
-			Token token = {};
-
-			switch (curr_read[0])
-			{
-				case ' ':
-				case '\t':
-				case '\r':
-				{
-					curr_read += 1;
-				} break;
-
-				case '\n':
-				{
-					can_be_preprocessor  = true;
-					curr_read           += 1;
-				} break;
-
-				default:
-				{
-					if (curr_read + 1 < read_eof && curr_read[0] == '/' && curr_read[1] == '/')
-					{
-						curr_read += 2;
-
-						while (curr_read < read_eof && curr_read[0] == ' ')
-						{
-							curr_read += 1;
-						}
-
-						constexpr String TAG = STR_OF("@META@");
-						if (curr_read + TAG.size <= read_eof && memcmp(curr_read, TAG.data, TAG.size) == 0)
-						{
-							curr_read += TAG.size;
-
-							while (curr_read < read_eof && curr_read[0] == ' ')
-							{
-								curr_read += 1;
-							}
-
-							token.kind     = TokenKind::meta;
-							token.str.data = curr_read;
-
-							while (curr_read + token.str.size < read_eof && curr_read[token.str.size] != '\r' && curr_read[token.str.size] != '\n')
-							{
-								token.str.size += 1;
-							}
-							curr_read += token.str.size;
-						}
-						else
-						{
-							while (curr_read < read_eof && curr_read[0] != '\n')
-							{
-								curr_read += 1;
-							}
-						}
-					}
-					else if (curr_read + 1 < read_eof && curr_read[0] == '/' && curr_read[1] == '*')
-					{
-						curr_read += 4;
-						while (curr_read < read_eof && !(curr_read[-2] == '*' && curr_read[-1] == '/'))
-						{
-							curr_read += 1;
-						}
-					}
-					else
-					{
-						token.str.data = curr_read;
-
-						if (curr_read[0] == '#' && can_be_preprocessor)
-						{
-							token.kind      = TokenKind::preprocessor;
-							token.str.data += 1;
-							curr_read      += 1;
-
-							bool32 escaped = false;
-							while
-							(
-								curr_read + token.str.size < read_eof
-								&& IMPLIES(curr_read[token.str.size] == '\r' || curr_read[token.str.size] == '\n', escaped)
-								&& IMPLIES(curr_read + token.str.size + 1 < read_eof, !(curr_read[token.str.size] == '/' && curr_read[token.str.size + 1] == '/'))
-								&& IMPLIES(curr_read + token.str.size + 1 < read_eof, !(curr_read[token.str.size] == '/' && curr_read[token.str.size + 1] == '*'))
-							)
-							{
-								if (curr_read[token.str.size] == '\\')
-								{
-									escaped = !escaped;
-								}
-								else if (curr_read[token.str.size] != '\r')
-								{
-									escaped = false;
-								}
-
-								token.str.size += 1;
-							}
-						}
-						else
-						{
-							can_be_preprocessor = false;
-
-							if (is_alpha(curr_read[0]))
-							{
-								token.kind = TokenKind::identifier;
-
-								while
-								(
-									curr_read + token.str.size < read_eof &&
-									(
-										curr_read[token.str.size] == '_'
-										|| is_alpha(curr_read[token.str.size])
-										|| is_digit(curr_read[token.str.size])
-									)
-								)
-								{
-									token.str.size += 1;
-								}
-							}
-							else if (is_digit(curr_read[0]) || curr_read[0] == '.' && curr_read + 1 < read_eof && is_digit(curr_read[1]))
-							{
-								token.kind = TokenKind::number;
-
-								while
-								(
-									curr_read + token.str.size < read_eof &&
-									(
-										is_digit(curr_read[token.str.size])
-										|| is_alpha(curr_read[token.str.size]) // @TODO@ Suffixes.
-										|| curr_read[token.str.size] == '.'
-										|| curr_read[token.str.size] == '\''
-									)
-								)
-								{
-									token.str.size += 1;
-								}
-							}
-							else if (curr_read[0] == '"')
-							{
-								token.kind      = TokenKind::string;
-								token.str.data += 1;
-								curr_read      += 1;
-
-								bool32 escaped = false;
-								while (curr_read + token.str.size < read_eof && IMPLIES(curr_read[token.str.size] == '"', escaped))
-								{
-									if (curr_read[token.str.size] == '\\')
-									{
-										escaped = !escaped;
-									}
-									else
-									{
-										escaped = false;
-									}
-
-									token.str.size += 1;
-								}
-								curr_read += 1;
-							}
-							else if (curr_read[0] == '\'')
-							{
-								token.kind      = TokenKind::character;
-								token.str.size  = 1;
-								token.str.data += 1;
-								curr_read      += 1;
-
-								if (curr_read < read_eof && curr_read[0] == '\\')
-								{
-									token.str.data += 1;
-									curr_read      += 1;
-								}
-
-								curr_read += 1;
-							}
-							else
-							{
-								token.kind      = static_cast<TokenKind>(curr_read[0]),
-								token.str.size += 1;
-							}
-						}
-						curr_read += token.str.size; // @TODO@ Distribute this into all the cases.
-					}
-				} break;
-			}
-
-			if (token.kind != TokenKind::null)
-			{
-				if (!IN_RANGE(curr_node->count, 0, ARRAY_CAPACITY(curr_node->buffer)))
-				{
-					curr_node->next  = reinterpret_cast<TokenBufferNode*>(malloc(sizeof(TokenBufferNode)));
-					*curr_node->next = { .prev = curr_node };
-					curr_node        = curr_node->next;
-				}
-
-				curr_node->buffer[curr_node->count] = token;
-				curr_node->count += 1;
-			}
-		}
-	}
-
-	return tokenizer;
-}
-
-internal void deinit_tokenizer(Tokenizer* tokenizer)
-{
-	free(tokenizer->file_data);
-
-	TokenBufferNode* node = tokenizer->curr_token_buffer_node;
-	ASSERT(node);
-	while (node->prev)
-	{
-		node = node->prev;
-	}
-	while (node)
-	{
-		TokenBufferNode* tail = node->next;
-		free(node);
-		node = tail;
-	}
-}
-
-internal Token shift(Tokenizer* tokenizer, i32 offset)
-{
-	ASSERT(tokenizer->curr_token_buffer_node);
-	ASSERT(IFF(tokenizer->curr_token_buffer_node->count == ARRAY_CAPACITY(tokenizer->curr_token_buffer_node->buffer), tokenizer->curr_token_buffer_node->next));
-
-	i32 steps = offset;
-	while (true)
-	{
-		if (tokenizer->curr_token_index < 0)
-		{
-			if (tokenizer->curr_token_buffer_node->prev)
-			{
-				tokenizer->curr_token_buffer_node  = tokenizer->curr_token_buffer_node->prev;
-				tokenizer->curr_token_index = tokenizer->curr_token_buffer_node->count - 1;
-			}
-			else
-			{
-				tokenizer->curr_token_index = 0;
-				return {};
-			}
-		}
-		else if (tokenizer->curr_token_index >= tokenizer->curr_token_buffer_node->count)
-		{
-			if (tokenizer->curr_token_buffer_node->next)
-			{
-				tokenizer->curr_token_buffer_node  = tokenizer->curr_token_buffer_node->next;
-				tokenizer->curr_token_index = 0;
-			}
-			else
-			{
-				tokenizer->curr_token_index = tokenizer->curr_token_buffer_node->count;
-				return {};
-			}
-		}
-
-		ASSERT(IN_RANGE(tokenizer->curr_token_index, 0, tokenizer->curr_token_buffer_node->count));
-
-		if (steps)
-		{
-			tokenizer->curr_token_index += sign(offset);
-			steps -= sign(offset);
-		}
-		else
-		{
-			return tokenizer->curr_token_buffer_node->buffer[tokenizer->curr_token_index];
-		}
-	}
-}
-
-internal Token peek(Tokenizer tokenizer, i32 offset = 0)
-{
-	return shift(&tokenizer, offset);
-}
-
-enum struct ContainerType : u8
+enum struct TypeContainerType : u8
 {
 	null,
 	a_struct,
 	a_union
 };
 
-enum struct EnumType : u8
-{
-	enum_unscoped,
-	enum_struct
-};
-
 enum struct ASTType : u8
 {
 	null,
-	root_type,
-	array,
-	container,
-	enumerator,
-	declaration,
-	tokens
+	a_enum,
+	type_atom,
+	type_array,
+	type_container,
+	declaration
 };
 
-struct AST;
-struct ASTNode
-{
-	ASTNode* next;
-	AST*     ast;
-};
+struct ASTNode;
 struct AST
 {
 	ASTType type;
@@ -482,510 +675,633 @@ struct AST
 	{
 		struct
 		{
-			String name;
-		} root_type;
-
-		struct
-		{
-			AST* underlying_type;
-			AST* capacity;
-		} array;
-
-		struct
-		{
-			ContainerType type;
-			String        name;
-			ASTNode*      declarations;
-		} container;
-
-		struct
-		{
-			EnumType  type;
-			String    name;
-			AST*      underlying_type;
-			ASTNode*  declarations;
-		} enumerator;
+			String   name;
+			AST*     underlying_type;
+			ASTNode* members;
+		} a_enum;
 
 		struct
 		{
 			String name;
+		} type_atom;
+
+		struct
+		{
+			AST*       underlying_type;
+			TokenNode* capacity;
+		} type_array;
+
+		struct
+		{
+			TypeContainerType type;
+			String            name;
+			ASTNode*          declarations;
+		} type_container;
+
+		struct
+		{
 			AST*   underlying_type;
-			AST*   assignment;
+			String name;
 		} declaration;
-
-		struct
-		{
-			TokenNode* node;
-		} tokens;
 	};
 };
 
-internal AST* init_ast(Tokenizer* tokenizer)
+struct ASTNode
 {
-	lambda init_single_ast_node =
-		[](AST* ast)
-		{
-			ASTNode* node = reinterpret_cast<ASTNode*>(malloc(sizeof(ASTNode)));
-			*node = {};
-			node->ast = ast;
-			return node;
-		};
+	ASTNode* next;
+	AST*     ast;
+};
 
-	lambda init_single_token_node =
-		[](Token token)
-		{
-			TokenNode* node = reinterpret_cast<TokenNode*>(malloc(sizeof(TokenNode)));
-			*node = {};
-			node->token = token;
-			return node;
-		};
+procedure AST* init_ast(Tokenizer* tokenizer, MemoryArena* arena)
+{
+	Token token = shift(tokenizer, 0);
 
-	Token token = peek(*tokenizer);
-
-	AST* ast = reinterpret_cast<AST*>(malloc(sizeof(AST)));
-	*ast = {};
-
-	if (token.kind == TokenKind::identifier && (token.str == STR_OF("struct") || token.str == STR_OF("union")))
+	if (is_reserved(token, ReservedType::a_enum))
 	{
-		ast->type           = ASTType::container;
-		ast->container.type =
-			token.str == STR_OF("struct")
-				? ContainerType::a_struct
-				: ContainerType::a_union;
-
-		ast->container.type = ContainerType::a_union;
+		AST* ast = allocate<AST>(arena);
+		*ast = { .type = ASTType::a_enum };
 
 		token = shift(tokenizer, 1);
-
-		if (token.kind == TokenKind::identifier)
+		if (token.type != TokenType::identifier)
 		{
-			ast->container.name = token.str;
-			token = shift(tokenizer, 1);
+			report(String("Expected an identifier for the enum name."), tokenizer);
+			return 0;
 		}
 
-		ASSERT(token.kind == static_cast<TokenKind>('{'));
+		ast->a_enum.name = token.text;
+
+		token = shift(tokenizer, 1); // @TODO@ Inferred underlying type.
+		if (!is_reserved(token, ':'))
+		{
+			report(String("Expected a colon to denote underlying type."), tokenizer);
+			return 0;
+		}
 
 		token = shift(tokenizer, 1);
+		if (token.type != TokenType::identifier)
+		{
+			report(String("Expected an identifier that would be the underlying type."), tokenizer);
+			return 0;
+		}
 
-		ASTNode** nil = &ast->container.declarations;
+		ast->a_enum.underlying_type  = allocate<AST>(arena);
+		*ast->a_enum.underlying_type =
+			{
+				.type      = ASTType::type_atom,
+				.type_atom = { .name = token.text }
+			};
+
+		token = shift(tokenizer, 1);
+		if (token.type == TokenType::meta)
+		{
+			ast->meta = token.meta.info;
+			token     = shift(tokenizer, 1);
+		}
+		if (!is_reserved(token, '{'))
+		{
+			report(String("Expected an opening curly brace."), tokenizer);
+			return 0;
+		}
+
+		token = shift(tokenizer, 1);
+		ASTNode** nil = &ast->a_enum.members;
 		while (true)
 		{
-			AST* sub_ast = init_ast(tokenizer);
-			if (sub_ast)
-			{
-				ASSERT(sub_ast->type == ASTType::declaration);
-				*nil = init_single_ast_node(sub_ast);
-				nil  = &(*nil)->next;
-
-				token = peek(*tokenizer);
-				ASSERT(token.kind == static_cast<TokenKind>(';'));
-
-				token = shift(tokenizer, 1);
-
-				if (token.kind == TokenKind::meta)
-				{
-					sub_ast->meta = token.str;
-					token = shift(tokenizer, 1);
-				}
-			}
-			else
+			token = shift(tokenizer, 0);
+			if (is_reserved(token, '}'))
 			{
 				break;
 			}
+			else if (token.type == TokenType::identifier)
+			{
+				*nil         = allocate<ASTNode>(arena);
+				**nil        = { .ast = allocate<AST>(arena) };
+				*(*nil)->ast =
+					{
+						.type        = ASTType::declaration,
+						.declaration = { .name = token.text }
+					};
+
+				token = shift(tokenizer, 1);
+				if (is_reserved(token, ','))
+				{
+					token = shift(tokenizer, 1);
+				}
+				if (token.type == TokenType::meta)
+				{
+					(*nil)->ast->meta = token.meta.info;
+					token = shift(tokenizer, 1);
+				}
+
+				nil = &(*nil)->next;
+			}
+			else
+			{
+				report(String("Expected an identifier for enum member."), tokenizer);
+				return 0;
+			}
 		}
 
-		token = peek(*tokenizer, 0);
-		ASSERT(token.kind == static_cast<TokenKind>('}'));
+		token = shift(tokenizer, 1);
+		if (!is_reserved(token, ';'))
+		{
+			report(String("Expected semicolon."), tokenizer);
+			return 0;
+		}
 
 		token = shift(tokenizer, 1);
-		if (token.kind == TokenKind::identifier)
-		{
-			AST* declaration = reinterpret_cast<AST*>(malloc(sizeof(AST)));
-			*declaration = {};
-			declaration->type                        = ASTType::declaration;
-			declaration->declaration.name            = token.str;
-			declaration->declaration.underlying_type = ast;
 
+		return ast;
+	}
+	else if (is_reserved(token, ReservedType::a_struct) || is_reserved(token, ReservedType::a_union))
+	{
+		AST* ast = allocate<AST>(arena);
+		*ast =
+			{
+				.type           = ASTType::type_container,
+				.type_container =
+					{
+						.type =
+							is_reserved(token, ReservedType::a_struct)
+								? TypeContainerType::a_struct
+								: TypeContainerType::a_union
+					}
+			};
+
+		Tokenizer old_tokenizer = *tokenizer;
+
+		token = shift(tokenizer, 1);
+		if (token.type == TokenType::identifier)
+		{
+			ast->type_container.name = token.text;
+			token = shift(tokenizer, 1);
+		}
+
+		if (!is_reserved(token, '{'))
+		{
+			report(String("Expected `{`."), tokenizer);
+			return 0;
+		}
+
+		ASTNode** nil = &ast->type_container.declarations;
+		for (token = shift(tokenizer, 1); !is_reserved(token, '}'); token = shift(tokenizer, 0))
+		{
+			AST* sub_ast = init_ast(tokenizer, arena);
+			if (sub_ast)
+			{
+				if (sub_ast->type != ASTType::declaration)
+				{
+					DEBUG_HALT();
+					report(String("Expected declaration."), tokenizer);
+					return 0;
+				}
+
+				*nil  = allocate<ASTNode>(arena);
+				**nil = { .ast = sub_ast };
+				nil   = &(*nil)->next;
+			}
+			else
+			{
+				report(String("Failed to parse for decalarations."), &old_tokenizer);
+				return 0;
+			}
+		}
+
+		token = shift(tokenizer, 1);
+		if (token.type == TokenType::identifier)
+		{
+			AST* declaration = allocate<AST>(arena);
+			*declaration =
+				{
+					.type        = ASTType::declaration,
+					.declaration =
+						{
+							.underlying_type = ast,
+							.name            = token.text
+						}
+				};
 			ast   = declaration;
 			token = shift(tokenizer, 1);
 		}
+		if (!is_reserved(token, ';'))
+		{
+			report(String("Expected semicolon."), tokenizer);
+			return 0;
+		}
 
-		// @TODO@ Array of inlined structs.
+		token = shift(tokenizer, 1);
+		if (token.type == TokenType::meta)
+		{
+			ast->meta = token.meta.info;
+			token = shift(tokenizer, 1);
+		}
 
 		return ast;
 	}
-	else if (token.kind == TokenKind::identifier && token.str == STR_OF("enum"))
-	{ // @TODO@ Consider all forms of enums.
-		ast->type = ASTType::enumerator;
-
-		token = shift(tokenizer, 1);
-		ASSERT(token.kind == TokenKind::identifier);
-
-		if (token.str == STR_OF("struct"))
-		{
-			ast->enumerator.type = EnumType::enum_struct;
-			token = shift(tokenizer, 1);
-			ASSERT(token.kind == TokenKind::identifier);
-		}
-
-		ast->enumerator.name = token.str;
-
-		token = shift(tokenizer, 1);
-		ASSERT(token.kind == static_cast<TokenKind>(':'));
-
-		token = shift(tokenizer, 1);
-		ASSERT(token.kind == TokenKind::identifier);
-		AST* underlying_type = reinterpret_cast<AST*>(malloc(sizeof(AST)));
-		*underlying_type = {};
-		underlying_type->type           = ASTType::root_type;
-		underlying_type->root_type.name = token.str;
-		ast->enumerator.underlying_type = underlying_type;
-
-		token = shift(tokenizer, 1);
-		if (token.kind == TokenKind::meta)
-		{
-			ast->meta = token.str;
-			token = shift(tokenizer, 1);
-		}
-		ASSERT(token.kind == static_cast<TokenKind>('{'));
-
-		token = shift(tokenizer, 1);
-		ASTNode** nil = &ast->enumerator.declarations;
-		while (true)
-		{
-			if (token.kind == TokenKind::identifier)
-			{
-				AST* declaration = reinterpret_cast<AST*>(malloc(sizeof(AST)));
-				*declaration = {};
-				declaration->type             = ASTType::declaration;
-				declaration->declaration.name = token.str;
-
-				token = shift(tokenizer, 1);
-				if (token.kind == static_cast<TokenKind>('='))
-				{
-					ASSERT("Enum assignments are not handled yet."); // @TODO@
-				}
-				if (token.kind == static_cast<TokenKind>(','))
-				{
-					token = shift(tokenizer, 1);
-				}
-				if (token.kind == TokenKind::meta)
-				{
-					declaration->meta = token.str;
-					token = shift(tokenizer, 1);
-				}
-
-				*nil = init_single_ast_node(declaration);
-				nil  = &(*nil)->next;
-			}
-			else if (token.kind == static_cast<TokenKind>('}'))
-			{
-				break;
-			}
-			else
-			{
-				ASSERT(!"Unexpected token.");
-			}
-		}
-
-		// @TODO@ Enum declaration.
-		token = shift(tokenizer, 1);
-		ASSERT(token.kind == static_cast<TokenKind>(';'));
-
-		return ast;
-	}
-	else if (token.kind == TokenKind::identifier && peek(*tokenizer, 1).kind == TokenKind::identifier)
+	else if (token.type == TokenType::identifier)
 	{
-		AST* underlying_type = reinterpret_cast<AST*>(malloc(sizeof(AST)));
-		*underlying_type = {};
-		underlying_type->type           = ASTType::root_type;
-		underlying_type->root_type.name = token.str;
-
-		token = shift(tokenizer, 1);
-		ast->type                        = ASTType::declaration;
-		ast->declaration.name            = token.str;
-		ast->declaration.underlying_type = underlying_type;
-
-		token = shift(tokenizer, 1);
-
-		if (token.kind == static_cast<TokenKind>('['))
-		{
-			AST* array = reinterpret_cast<AST*>(malloc(sizeof(AST)));
-			*array = {};
-			array->type                  = ASTType::array;
-			array->array.underlying_type = underlying_type;
-
-			AST* capacity = reinterpret_cast<AST*>(malloc(sizeof(AST)));
-			*capacity = {};
-			capacity->type        = ASTType::tokens;
-			capacity->tokens.node = 0;
-
-			TokenNode** nil = &capacity->tokens.node;
-			for (token = shift(tokenizer, 1); token.kind != static_cast<TokenKind>(']'); token = shift(tokenizer, 1))
+		AST* ast = allocate<AST>(arena);
+		*ast =
 			{
-				ASSERT(token.kind != TokenKind::null);
-				*nil = init_single_token_node(token);
-				nil  = &(*nil)->next;
-			}
-
-			array->array.capacity            = capacity;
-			ast->declaration.underlying_type = array;
-
-			token = shift(tokenizer, 1);
-		}
-
-		return ast;
-	}
-
-	free(ast);
-	return 0;
-}
-
-internal void deinit_ast(AST* ast)
-{
-	if (ast)
-	{
-		lambda deinit_entire_ast_node =
-			[](ASTNode* node)
+				.type        = ASTType::declaration,
+				.declaration = { .underlying_type = allocate<AST>(arena) }
+			};
+		*ast->declaration.underlying_type =
 			{
-				for (ASTNode* curr_node = node; curr_node;)
-				{
-					ASTNode* tail = curr_node->next;
-					deinit_ast(curr_node->ast);
-					free(curr_node);
-					curr_node = tail;
-				}
+				.type      = ASTType::type_atom,
+				.type_atom =
+					{
+						.name = token.text
+					}
 			};
 
-		lambda deinit_entire_token_node =
-			[](TokenNode* node)
-			{
-				for (TokenNode* curr_node = node; curr_node;)
-				{
-					TokenNode* tail = curr_node->next;
-					free(curr_node);
-					curr_node = tail;
-				}
-			};
-
-		switch (ast->type)
+		token = shift(tokenizer, 1);
+		if (token.type != TokenType::identifier)
 		{
-			case ASTType::root_type:
-			{
-			} break;
-
-			case ASTType::array:
-			{
-				deinit_ast(ast->array.underlying_type);
-				deinit_ast(ast->array.capacity);
-			} break;
-
-			case ASTType::container:
-			{
-				deinit_entire_ast_node(ast->container.declarations);
-			} break;
-
-			case ASTType::enumerator:
-			{
-				deinit_ast(ast->enumerator.underlying_type);
-				deinit_entire_ast_node(ast->enumerator.declarations);
-			} break;
-
-			case ASTType::declaration:
-			{
-				deinit_ast(ast->declaration.underlying_type);
-				deinit_ast(ast->declaration.assignment);
-			} break;
-
-			case ASTType::tokens:
-			{
-				deinit_entire_token_node(ast->tokens.node);
-			} break;
-
-			default:
-			{
-				ASSERT(!"Internal error :: Unexpected AST type");
-				exit(1);
-			} break;
+			report(String("Expected name of declaration."), tokenizer);
+			return 0;
 		}
 
-		free(ast);
+		ast->declaration.name = token.text;
+
+		token = shift(tokenizer, 1);
+		if (is_reserved(token, '['))
+		{
+			{
+				AST* array = allocate<AST>(arena);
+				*array =
+					{
+						.type       = ASTType::type_array,
+						.type_array = { .underlying_type = ast->declaration.underlying_type }
+					};
+				ast->declaration.underlying_type = array;
+			}
+
+			TokenNode** nil = &ast->declaration.underlying_type->type_array.capacity;
+			for (token = shift(tokenizer, 1); !is_reserved(token, ']'); token = shift(tokenizer, 1))
+			{
+				TokenNode* node = allocate<TokenNode>(arena);
+				*node = { .token = token };
+				*nil  = node;
+				nil   = &(*nil)->next;
+			}
+			token = shift(tokenizer, 1);
+		}
+		if (!is_reserved(token, ';'))
+		{
+			report(String("Expected semicolon."), tokenizer);
+			return 0;
+		}
+
+		token = shift(tokenizer, 1);
+		if (token.type == TokenType::meta)
+		{
+			ast->meta = token.meta.info;
+			token = shift(tokenizer, 1);
+		}
+
+		return ast;
+	}
+	else
+	{
+		report(String("Unknown handling of token."), tokenizer);
+		return 0;
 	}
 }
 
 int main()
 {
-	DEFER { ASSERT(DEBUG_ALLOCATION_COUNT == 0); };
-
+	//DEFER { DEBUG_STDOUT_HALT(); };
 
 	MemoryArena main_arena = {};
 	main_arena.size = MEBIBYTES_OF(1);
-	main_arena.base = reinterpret_cast<byte*>(malloc(main_arena.size));
-	DEFER { free(main_arena.base); };
-
-	constexpr String INCLUDE_META_DIRECTIVE = STR_OF("include \"meta/");
-
-	Tokenizer main_tokenizer = init_tokenizer(SRC_DIR "HandmadeRalph.cpp");
-	DEFER { deinit_tokenizer(&main_tokenizer); };
-
-	while (true)
+	main_arena.data = reinterpret_cast<byte*>(malloc(main_arena.size));
+	if (!main_arena.data)
 	{
-		arena_checkpoint(&main_arena);
+		return 1;
+	}
+	DEFER { free(main_arena.data); };
 
-		Token main_token = shift(&main_tokenizer, 0);
+	Tokenizer main_tokenizer = init_tokenizer(String(SRC_DIR "HandmadeRalph.cpp"), &main_arena);
 
-		if (main_token.kind == TokenKind::null)
+	for (Token main_token = shift(&main_tokenizer, 0); main_token.type != TokenType::null; main_token = shift(&main_tokenizer, 1))
+	{
+		if (main_token.type == TokenType::preprocessor)
 		{
-			break;
-		}
-		else if (main_token.kind == TokenKind::preprocessor && starts_with(main_token.str, INCLUDE_META_DIRECTIVE))
-		{
-			String operation = trunc(shift(main_token.str, INCLUDE_META_DIRECTIVE.size), '/');
-			String file_path = trunc(shift(main_token.str, '"'), '"');
+			String file_path = main_token.text;
+			ASSERT(file_path.size && file_path.data[0] == '#');
 
-			File file = init_file(file_path);
-			DEFER { deinit_file(&file); };
+			do
+			{
+				file_path = trim(file_path, 1);
+			}
+			while (file_path.size && is_whitespace(file_path.data[0]));
 
-			if (operation == STR_OF("asset"))
+			if (!starts_with(file_path, String("include")))
+			{
+				continue;
+			}
+
+			file_path = trim(file_path, String("include").size);
+
+			while (file_path.size && is_whitespace(file_path.data[0]))
+			{
+				file_path = trim(file_path, 1);
+			}
+
+			file_path = rtrim(trim(file_path, 1), 1);
+
+			if (!starts_with(file_path, String("META/")))
+			{
+				continue;
+			}
+
+			String meta_operation = trim(file_path, String("META/").size);
+			String file_name      = meta_operation;
+			FOR_STR(meta_operation)
+			{
+				if (*it == '/')
+				{
+					meta_operation.size = it_index;
+					file_name           = trim(file_name, it_index + 1);
+					break;
+				}
+			}
+
+			if (meta_operation == String("enum"))
 			{
 				Tokenizer meta_tokenizer = main_tokenizer;
-				Token     meta_token     = main_token;
+				Token     meta_token     = shift(&meta_tokenizer, 0);
 
-				while (!(meta_token.kind == TokenKind::identifier && meta_token.str == STR_OF("union")))
+				while (true)
 				{
 					meta_token = shift(&meta_tokenizer, -1);
-					ASSERT(meta_token.kind != TokenKind::null);
-				}
 
-				AST* ast = init_ast(&meta_tokenizer);
-				DEFER { deinit_ast(ast); };
-
-				ASSERT(write(&file, STR_OF("global inline constexpr wstrlit META_")));
-				ASSERT(write(&file, trunc(rtrunc(file_path, '/'), '.')));
-				ASSERT(write(&file, STR_OF("[] =\n\t{\n")));
-
-				ASSERT(ast->type == ASTType::container);
-				ASSERT(ast->container.type == ContainerType::a_union);
-				ASSERT(ast->container.declarations->ast->declaration.underlying_type->type == ASTType::container);
-
-				StringBuilder* post_asserts = init_string_builder(&main_arena);
-
-				FOR_NODES(declaration, ast->container.declarations->ast->declaration.underlying_type->container.declarations)
-				{
-					ASSERT(+declaration->ast->meta);
-
-					write(&file, STR_OF("\t\t"));
-					String remaining = declaration->ast->meta;
-					i32    count     = 0;
-					while (true)
+					if (is_reserved(meta_token, ReservedType::a_enum))
 					{
-						write(&file, STR_OF("DATA_DIR L\""));
-						write(&file, trim_whitespace(trunc(remaining, ',')));
-						write(&file, STR_OF("\""));
-
-						remaining  = shift(remaining, ',');
-						count     += 1;
-						if (+remaining)
+						meta_token = shift(&meta_tokenizer, 1);
+						if (meta_token.type == TokenType::identifier && meta_token.text == String("Cardinal"))
 						{
-							write(&file, STR_OF(", "));
+							meta_token = shift(&meta_tokenizer, -1);
+							break;
 						}
 						else
 						{
-							break;
+							meta_token = shift(&meta_tokenizer, -1);
 						}
 					}
-					if (declaration->next)
-					{
-						write(&file, STR_OF(","));
-					}
-					write(&file, STR_OF("\n"));
 
-					// @TODO@ Check?
-					appendf(post_asserts, "static_assert(");
-					if (declaration->ast->declaration.underlying_type->type == ASTType::array)
+					if (meta_token.type == TokenType::null)
 					{
-						FOR_NODES(token, declaration->ast->declaration.underlying_type->array.capacity->tokens.node)
-						{
-							appendf(post_asserts, "%.*s", PASS_STR(token->token.str));
-						}
+						report(String("Failed to find enum declaration."), &main_tokenizer);
+						return 1;
 					}
-					else
-					{
-						appendf(post_asserts, "1");
-					}
-
-					appendf(post_asserts, " == %d);\n", count);
 				}
 
-				ASSERT(write(&file, STR_OF("\t};\n")));
-				ASSERT(write(&file, build(post_asserts)));
+				deferred_arena_reset(&main_arena);
+				AST* ast = init_ast(&meta_tokenizer, &main_arena);
+				if (!ast)
+				{
+					report(String("Failed to parse the AST for the meta operation."), &main_tokenizer);
+					return 1;
+				}
+
+				ASSERT(ast->type == ASTType::a_enum);
+				ASSERT(ast->a_enum.underlying_type && ast->a_enum.underlying_type->type == ASTType::type_atom);
+
+				StringBuilder* meta_builder = init_string_builder(&main_arena);
+
+				append(meta_builder, String("global inline constexpr struct META_"));
+				append(meta_builder, ast->a_enum.name);
+				append(meta_builder, String("_t { "));
+				append(meta_builder, ast->a_enum.name);
+				append(meta_builder, String(" enumerator; "));
+				append(meta_builder, ast->a_enum.underlying_type->type_atom.name);
+				append(meta_builder, String(" value; union { String str; struct { byte PADDING_[offsetof(String, data)]; strlit cstr; }; }; "));
+
+				if (+ast->meta)
+				{
+					append(meta_builder, ast->meta);
+					append(meta_builder, String(" "));
+				}
+
+				append(meta_builder, String("} META_"));
+				append(meta_builder, ast->a_enum.name);
+				append(meta_builder, String("[] =\n\t{\n"));
+
+				FOR_NODES(ast->a_enum.members)
+				{
+					append(meta_builder, String("\t\t{ "));
+					append(meta_builder, ast->a_enum.name);
+					append(meta_builder, String("::"));
+					append(meta_builder, it->ast->declaration.name);
+					append(meta_builder, String(", static_cast<"));
+					append(meta_builder, ast->a_enum.underlying_type->type_atom.name);
+					append(meta_builder, String(">("));
+					append(meta_builder, ast->a_enum.name);
+					append(meta_builder, String("::"));
+					append(meta_builder, it->ast->declaration.name);
+					append(meta_builder, String("), String(\""));
+					append(meta_builder, it->ast->declaration.name);
+					append(meta_builder, String("\")"));
+
+					if (+it->ast->meta)
+					{
+						if (+ast->meta)
+						{
+							append(meta_builder, String(", "));
+							append(meta_builder, it->ast->meta);
+						}
+						else
+						{
+							report(String("An enum member has a meta tag when the enum declaration does not."), &main_tokenizer);
+							return 1;
+						}
+					}
+
+					append(meta_builder, String(" }"));
+					if (it->next)
+					{
+						append(meta_builder, String(","));
+					}
+					append(meta_builder, String("\n"));
+				}
+
+				append(meta_builder, String("\t};"));
+
+				String meta_data = flush(meta_builder);
+				append(meta_builder, String(SRC_DIR));
+				append(meta_builder, file_path);
+				write(flush(meta_builder), meta_data);
 			}
-			else if (operation == STR_OF("enum"))
+			else if (meta_operation == String("asset"))
 			{
 				Tokenizer meta_tokenizer = main_tokenizer;
-				Token     meta_token     = main_token;
+				Token     meta_token     = shift(&meta_tokenizer, 0);
 
-				while (!(meta_token.kind == TokenKind::identifier && meta_token.str == STR_OF("enum")))
+				meta_token = shift(&meta_tokenizer, -1);
+				if (!is_reserved(meta_token, ';'))
+				{
+					report(String("Expected semicolon to denote the end of a union declaration."), &meta_tokenizer);
+					return 1;
+				}
+
+				meta_token = shift(&meta_tokenizer, -1);
+				if (!is_reserved(meta_token, '}'))
+				{
+					report(String("Expected a closing curly brace to denote the end of a union declaration."), &meta_tokenizer);
+					return 1;
+				}
+
+				for (i32 depth= 1; depth;)
 				{
 					meta_token = shift(&meta_tokenizer, -1);
-					ASSERT(meta_token.kind != TokenKind::null);
-				}
 
-				AST* ast = init_ast(&meta_tokenizer);
-				DEFER { deinit_ast(ast); };
-
-				ASSERT(ast->type == ASTType::enumerator);
-				ASSERT(+ast->meta);
-				ASSERT(ast->enumerator.underlying_type->type == ASTType::root_type);
-
-				write(&file, STR_OF("global inline constexpr struct META_"));
-				write(&file, ast->enumerator.name);
-				write(&file, STR_OF("_t { "));
-				write(&file, ast->enumerator.name);
-				write(&file, STR_OF(" enumerator; "));
-				write(&file, ast->enumerator.underlying_type->root_type.name);
-				write(&file, STR_OF(" value; union { String str; struct { char PADDING_[offsetof(String, data)]; strlit cstr; }; }; "));
-				write(&file, ast->meta);
-				write(&file, STR_OF(" } META_"));
-				write(&file, ast->enumerator.name);
-				write(&file, STR_OF("[] =\n\t{\n"));
-
-				FOR_NODES(declaration, ast->enumerator.declarations)
-				{
-					write(&file, STR_OF("\t\t{ "));
-
-					write(&file, declaration->ast->declaration.name);
-					write(&file, STR_OF(", static_cast<"));
-					write(&file, ast->enumerator.underlying_type->root_type.name);
-					write(&file, STR_OF(">("));
-					write(&file, declaration->ast->declaration.name);
-					write(&file, STR_OF("), STR_OF(\""));
-					write(&file, declaration->ast->declaration.name);
-					write(&file, STR_OF("\"), "));
-
-					ASSERT(+declaration->ast->meta);
-					write(&file, declaration->ast->meta);
-
-					write(&file, STR_OF(" }"));
-					if (declaration->next)
+					if (meta_token.type == TokenType::null)
 					{
-						write(&file, STR_OF(","));
+						report(String("Failed to find the corresponding union for the meta oepration."), &main_tokenizer);
+						return 1;
 					}
-					write(&file, STR_OF("\n"));
+					else if (is_reserved(meta_token, '{'))
+					{
+						depth -= 1;
+						if (depth == 0)
+						{
+							meta_token = shift(&meta_tokenizer, -1);
+							if (!is_reserved(meta_token, ReservedType::a_union))
+							{
+								report(String("Expected keyword `union` here."), &meta_tokenizer);
+								report(String("Failed to do meta operation."), &main_tokenizer);
+								return 1;
+							}
+						}
+					}
+					else if (is_reserved(meta_token, '}'))
+					{
+						depth += 1;
+					}
 				}
 
-				write(&file, STR_OF("\t};"));
+				deferred_arena_reset(&main_arena);
+				AST* ast = init_ast(&meta_tokenizer, &main_arena);
+				if (!ast)
+				{
+					report(String("Failed to parse the AST for the meta operation."), &main_tokenizer);
+					return 1;
+				}
+				if
+				(
+					ast->type != ASTType::type_container || ast->type_container.type != TypeContainerType::a_union ||
+					!ast->type_container.declarations       || ast->type_container.declarations->ast->declaration.underlying_type->type != ASTType::type_container || ast->type_container.declarations->ast->declaration.underlying_type->type_container.type != TypeContainerType::a_struct ||
+					!ast->type_container.declarations->next || ast->type_container.declarations->next->ast->declaration.underlying_type->type != ASTType::type_array
+				)
+				{
+					report(String("Invalid layout for meta operation."), &main_tokenizer);
+					return 1;
+				}
+
+				String meta_name = file_name;
+				FOR_STR(file_name)
+				{
+					if (*it == '.')
+					{
+						meta_name.size = it_index;
+						break;
+					}
+				}
+
+				StringBuilder* meta_builder  = init_string_builder(&main_arena);
+				StringBuilder* defer_builder = init_string_builder(&main_arena);
+
+				append(meta_builder, String("global inline constexpr String META_"));
+				append(meta_builder, meta_name);
+				append(meta_builder, String("[] =\n\t{\n"));
+
+				FOR_NODES(declaration, ast->type_container.declarations->ast->declaration.underlying_type->type_container.declarations)
+				{
+					if (!declaration->ast->meta.data)
+					{
+						report(String("Not all assets have a meta tag."), &main_tokenizer);
+						return 1;
+					}
+
+					append(meta_builder, String("\t\t"));
+
+					i32    asset_path_count = 0;
+					String remaining        = declaration->ast->meta;
+					while (remaining.size)
+					{
+						if (is_whitespace(remaining.data[0]))
+						{
+							remaining = trim(remaining, 1);
+						}
+						else
+						{
+							asset_path_count += 1;
+
+							String asset_path = remaining;
+							FOR_STR(asset_path)
+							{
+								if (*it == ',')
+								{
+									asset_path.size = it_index;
+									break;
+								}
+							}
+
+							remaining = trim(remaining, asset_path.size + 1);
+
+							while (asset_path.size && is_whitespace(asset_path.data[asset_path.size - 1]))
+							{
+								asset_path.size -= 1;
+							}
+
+							append(meta_builder, String("String(DATA_DIR \""));
+							append(meta_builder, asset_path);
+							append(meta_builder, String("\")"));
+
+							while (remaining.size && is_whitespace(remaining.data[0]))
+							{
+								remaining = trim(remaining, 1);
+							}
+							if (remaining.size || declaration->next)
+							{
+								append(meta_builder, String(", "));
+							}
+						}
+					}
+					append(meta_builder , String("\n"));
+					append (defer_builder, String("static_assert(sizeof("));
+					append (defer_builder, ast->type_container.declarations->ast->declaration.name);
+					append (defer_builder, String("."));
+					append (defer_builder, declaration->ast->declaration.name);
+					append (defer_builder, String(") / sizeof("));
+					append (defer_builder, ast->type_container.declarations->next->ast->declaration.underlying_type->type_array.underlying_type->type_atom.name);
+					append (defer_builder, String(") == "));
+					appendf(defer_builder, "%d", asset_path_count);
+					append (defer_builder, String(", \"("));
+					append (defer_builder, ast->type_container.declarations->ast->declaration.name);
+					append (defer_builder, String("."));
+					append (defer_builder, declaration->ast->declaration.name);
+					append (defer_builder, String(")("));
+					appendf(defer_builder, "%d", main_token.line_index + 1);
+					append (defer_builder, String(") :: The amount of assets and file paths are not the same.\");\n"));
+				}
+
+				append(meta_builder, String("\t};\n"));
+				append(meta_builder, defer_builder);
+
+				String meta_data = flush(meta_builder);
+				append(meta_builder, String(SRC_DIR));
+				append(meta_builder, file_path);
+				write(flush(meta_builder), meta_data);
 			}
 			else
 			{
-				// @TODO@ Line number and locality.
-				printf(":: Unknown include meta directive : `%.*s`\n", PASS_STR(main_token.str));
+				report(String("Unknown meta operation."), &main_tokenizer);
 				return 1;
 			}
 		}
-
-		shift(&main_tokenizer, 1);
 	}
-
 	return 0;
 }

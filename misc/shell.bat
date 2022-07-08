@@ -1,5 +1,5 @@
 @echo off
 
-if NOT DEFINED DevEnvDir (
+if not defined DevEnvDir (
 	call vcvarsall.bat x64
 )

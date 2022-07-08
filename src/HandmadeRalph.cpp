@@ -27,14 +27,14 @@ struct Chunk
 
 struct ChunkNode
 {
-	ChunkNode* next_node;
+	ChunkNode* next;
 	Chunk      chunk;
 };
 
 struct BMP
 {
-	vi2   dims;
-	RGBA* rgba;
+	vi2  dims;
+	u32* rgba;
 };
 
 enum Cardinal : u8 // @META@ vf2 vf; vi2 vi;
@@ -44,7 +44,7 @@ enum Cardinal : u8 // @META@ vf2 vf; vi2 vi;
 	Cardinal_down,  // @META@ {  0.0f, -1.0f }, {  0, -1 }
 	Cardinal_up     // @META@ {  0.0f,  1.0f }, {  0,  1 }
 };
-#include "meta/enum/Cardinal.h"
+#include "META/enum/Cardinal.h"
 
 struct Rock
 {
@@ -74,7 +74,7 @@ struct State
 		}   bmp;
 		BMP bmps[sizeof(bmp) / sizeof(BMP)];
 	};
-	#include "meta/asset/bmp_file_paths.h"
+	#include "META/asset/bmp_file_paths.h"
 
 	ChunkNode* available_chunk_node;
 	ChunkNode  chunk_node_hash_table[64];
@@ -106,7 +106,7 @@ struct State
 static_assert(sizeof(State) < PLATFORM_MEMORY_SIZE / 4);
 
 template <typename TYPE>
-internal TYPE eat(PlatformFileData* file_data)
+procedure TYPE eat(PlatformFileData* file_data)
 {
 	ASSERT(file_data->read_index + sizeof(TYPE) <= file_data->size);
 	TYPE value;
@@ -115,21 +115,20 @@ internal TYPE eat(PlatformFileData* file_data)
 	return value;
 }
 
-internal void draw_rect(PlatformFramebuffer* platform_framebuffer, vi2 bottom_left, vi2 dims, RGBA rgba)
+procedure void draw_rect(PlatformFramebuffer* platform_framebuffer, vi2 bottom_left, vi2 dims, u32 rgba)
 {
 	ASSERT(IN_RANGE(dims.x, 0, 1024));
 	ASSERT(IN_RANGE(dims.y, 0, 1024));
-	u32 pixel_value = pack_as_raw_argb(rgba);
 	FOR_RANGE(y, max(platform_framebuffer->dims.y - bottom_left.y - dims.y, 0), min(platform_framebuffer->dims.y - bottom_left.y, platform_framebuffer->dims.y))
 	{
 		FOR_RANGE(x, max(bottom_left.x, 0), min(bottom_left.x + dims.x, platform_framebuffer->dims.x))
 		{
-			platform_framebuffer->pixels[y * platform_framebuffer->dims.x + x] = pixel_value;
+			platform_framebuffer->pixels[y * platform_framebuffer->dims.x + x] = rgba;
 		}
 	}
 }
 
-internal void draw_bmp(PlatformFramebuffer* platform_framebuffer, BMP* bmp, vi2 bottom_left)
+procedure void draw_bmp(PlatformFramebuffer* platform_framebuffer, BMP* bmp, vi2 bottom_left)
 {
 	FOR_RANGE(y, max(platform_framebuffer->dims.y - bottom_left.y - bmp->dims.y, 0), min(platform_framebuffer->dims.y - bottom_left.y, platform_framebuffer->dims.y))
 	{
@@ -138,26 +137,28 @@ internal void draw_bmp(PlatformFramebuffer* platform_framebuffer, BMP* bmp, vi2 
 			aliasing dst = platform_framebuffer->pixels[y * platform_framebuffer->dims.x + x];
 			aliasing top = bmp->rgba[(platform_framebuffer->dims.y - bottom_left.y - 1 - y) * bmp->dims.x + x - bottom_left.x];
 
-			if (top.a == 255)
+			if ((top >> 24) == 255)
 			{
-				dst = pack_as_raw_argb(top);
+				dst = top;
 			}
-			else if (top.a)
+			else if (top >> 24)
 			{
-				dst = pack_as_raw_argb(rgba_from(lerp(vf3_from(unpack_raw_argb(dst)), vf3_from(top), top.a / 255.0f)));
+				dst =
+					(static_cast<u32>(static_cast<u8>(static_cast<f32>((dst >> 16) & 255) * (1.0f - ((top >> 24) & 255) / 255.0f) + static_cast<f32>((top >> 16) & 255) * ((top >> 24) & 255) / 255.0f)) << 16) |
+					(static_cast<u32>(static_cast<u8>(static_cast<f32>((dst >>  8) & 255) * (1.0f - ((top >> 24) & 255) / 255.0f) + static_cast<f32>((top >>  8) & 255) * ((top >> 24) & 255) / 255.0f)) <<  8) |
+					(static_cast<u32>(static_cast<u8>(static_cast<f32>((dst >>  0) & 255) * (1.0f - ((top >> 24) & 255) / 255.0f) + static_cast<f32>((top >>  0) & 255) * ((top >> 24) & 255) / 255.0f)) <<  0);
 			}
 		}
 	}
 }
 
-internal void draw_circle(PlatformFramebuffer* platform_framebuffer, vi2 pos, i32 radius, RGBA rgba)
+procedure void draw_circle(PlatformFramebuffer* platform_framebuffer, vi2 pos, i32 radius, u32 rgba)
 {
 	ASSERT(IN_RANGE(radius, 0, 128));
 	i32 x0          = clamp(                               pos.x - radius, 0, platform_framebuffer->dims.x);
 	i32 x1          = clamp(                               pos.x + radius, 0, platform_framebuffer->dims.x);
 	i32 y0          = clamp(platform_framebuffer->dims.y - pos.y - radius, 0, platform_framebuffer->dims.y);
 	i32 y1          = clamp(platform_framebuffer->dims.y - pos.y + radius, 0, platform_framebuffer->dims.y);
-	u32 pixel_value = pack_as_raw_argb(rgba);
 
 	FOR_RANGE(x, x0, x1)
 	{
@@ -165,7 +166,7 @@ internal void draw_circle(PlatformFramebuffer* platform_framebuffer, vi2 pos, i3
 		{
 			if (square(x - pos.x) + square(y - platform_framebuffer->dims.y + pos.y) <= square(radius))
 			{
-				platform_framebuffer->pixels[y * platform_framebuffer->dims.x + x] = pixel_value;
+				platform_framebuffer->pixels[y * platform_framebuffer->dims.x + x] = rgba;
 			}
 		}
 	}
@@ -188,14 +189,14 @@ struct CollisionResult
 	f32           priority;
 };
 
-internal const CollisionResult& prioritize_collision_results(const CollisionResult& a, const CollisionResult& b)
+procedure const CollisionResult& prioritize_collision_results(const CollisionResult& a, const CollisionResult& b)
 {
 	return b.type == CollisionType::none || a.type != CollisionType::none && a.priority > b.priority
 		? a
 		: b;
 }
 
-internal CollisionResult collide_against_plane(vf2 displacement, vf2 plane_center, vf2 plane_normal)
+procedure CollisionResult collide_against_plane(vf2 displacement, vf2 plane_center, vf2 plane_normal)
 {
 	f32 inside_amount       = dot(plane_normal, plane_center);
 	f32 intersection_scalar = inside_amount / dot(plane_normal, displacement);
@@ -225,14 +226,14 @@ internal CollisionResult collide_against_plane(vf2 displacement, vf2 plane_cente
 	}
 }
 
-internal CollisionResult collide_against_line(vf2 displacement, vf2 line_center, vf2 line_normal, f32 padding)
+procedure CollisionResult collide_against_line(vf2 displacement, vf2 line_center, vf2 line_normal, f32 padding)
 {
 	vf2 plane_normal = line_normal * (dot(line_center, line_normal) > 0.0f ? -1.0f : 1.0f);
 	return collide_against_plane(displacement, line_center + plane_normal * padding, plane_normal);
 }
 
 // @TODO@ Bugs out on `radius == 0.0f`
-internal CollisionResult collide_against_circle(vf2 displacement, vf2 center, f32 radius)
+procedure CollisionResult collide_against_circle(vf2 displacement, vf2 center, f32 radius)
 {
 	f32 distance_from_center    = norm(center);
 	f32 amount_away_from_center = -dot(center, displacement);
@@ -281,7 +282,7 @@ internal CollisionResult collide_against_circle(vf2 displacement, vf2 center, f3
 	}
 }
 
-internal CollisionResult collide_against_rounded_rectangle(vf2 displacement, vf2 rect_bottom_left, vf2 rect_dims, f32 padding)
+procedure CollisionResult collide_against_rounded_rectangle(vf2 displacement, vf2 rect_bottom_left, vf2 rect_dims, f32 padding)
 {
 	CollisionResult left_right = collide_against_line(displacement, rect_bottom_left + vf2 { rect_dims.x / 2.0f, 0.0f }, { 1.0f, 0.0f }, rect_dims.x / 2.0f + padding);
 	if (left_right.type != CollisionType::none && !IN_RANGE(left_right.new_displacement.y - rect_bottom_left.y, 0.0f, rect_dims.y))
@@ -333,7 +334,7 @@ struct CollisionShape
 	};
 };
 
-internal CollisionResult collide_shapes(vf2 displacement, CollisionShape a, vf2 pos, CollisionShape b)
+procedure CollisionResult collide_shapes(vf2 displacement, CollisionShape a, vf2 pos, CollisionShape b)
 {
 	if (a.type <= b.type)
 	{
@@ -392,7 +393,7 @@ internal CollisionResult collide_shapes(vf2 displacement, CollisionShape a, vf2 
 	}
 }
 
-internal Chunk* get_chunk(State* state, vi2 coords)
+procedure Chunk* get_chunk(State* state, vi2 coords)
 {
 	// @TODO@ Better hash function...
 	i32 hash = mod(coords.x * 13 + coords.y * 7 + coords.x * coords.y * 17, ARRAY_CAPACITY(state->chunk_node_hash_table));
@@ -409,13 +410,21 @@ internal Chunk* get_chunk(State* state, vi2 coords)
 			}
 			else
 			{
-				if (!chunk_node->next_node)
+				if (!chunk_node->next)
 				{
-					chunk_node->next_node               = memory_arena_allocate_from_available(&state->available_chunk_node, &state->arena);
-					chunk_node->next_node->chunk.exists = false;
+					if (state->available_chunk_node)
+					{
+						chunk_node->next            = state->available_chunk_node;
+						state->available_chunk_node = state->available_chunk_node->next;
+					}
+					else
+					{
+						chunk_node->next = allocate<ChunkNode>(&state->arena);
+					}
+					chunk_node->next->chunk.exists = false;
 				}
 
-				chunk_node = chunk_node->next_node;
+				chunk_node = chunk_node->next;
 			}
 		}
 		else
@@ -461,7 +470,7 @@ enum struct MoveTag : u8
 	rock
 };
 
-internal void process_move(Chunk** chunk, vf3* rel_pos, vf3* vel, CollisionShape shape, MoveTag tag, void* semantic, State* state, f32 delta_time)
+procedure void process_move(Chunk** chunk, vf3* rel_pos, vf3* vel, CollisionShape shape, MoveTag tag, void* semantic, State* state, f32 delta_time)
 {
 	vel->z += GRAVITY * delta_time;
 
@@ -603,6 +612,19 @@ internal void process_move(Chunk** chunk, vf3* rel_pos, vf3* vel, CollisionShape
 	}
 }
 
+procedure u32 rgba_from(vf3 rgb)
+{
+	return
+		((static_cast<u32>(rgb.x * 255.0f) << 16)) |
+		((static_cast<u32>(rgb.y * 255.0f) <<  8)) |
+		((static_cast<u32>(rgb.z * 255.0f) <<  0));
+}
+
+procedure u32 rgba_from(f32 r, f32 g, f32 b)
+{
+	return rgba_from({ r, g, b, });
+}
+
 PlatformUpdate_t(PlatformUpdate)
 {
 	State* state = reinterpret_cast<State*>(platform_memory);
@@ -614,12 +636,12 @@ PlatformUpdate_t(PlatformUpdate)
 		state->arena =
 			{
 				.size = PLATFORM_MEMORY_SIZE - sizeof(State),
-				.base = platform_memory      + sizeof(State)
+				.data = platform_memory      + sizeof(State)
 			};
 
 		FOR_ELEMS(bmp, state->bmps)
 		{
-			PlatformFileData file_data = PlatformReadFileData(state->META_bmp_file_paths[bmp_index]);
+			PlatformFileData file_data = PlatformReadFileData(State::META_bmp_file_paths[bmp_index]);
 			if (!file_data.data)
 			{
 				ASSERT(false);
@@ -674,7 +696,7 @@ PlatformUpdate_t(PlatformUpdate)
 			}
 
 			bmp->dims = header.dims;
-			bmp->rgba = memory_arena_allocate<RGBA>(&state->arena, static_cast<u64>(bmp->dims.x) * bmp->dims.y);
+			bmp->rgba = allocate<u32>(&state->arena, static_cast<u64>(bmp->dims.x) * bmp->dims.y);
 
 			// @TODO@ Microsoft specific intrinsic...
 			u32 lz_r = __lzcnt(header.mask_r);
@@ -687,12 +709,10 @@ PlatformUpdate_t(PlatformUpdate)
 				{
 					aliasing bmp_pixel = reinterpret_cast<u32*>(file_data.data + header.pixel_data_offset)[y * header.dims.x + x];
 					bmp->rgba[y * bmp->dims.x + x] =
-						{
-							((bmp_pixel & header.mask_r) << lz_r) >> 24,
-							((bmp_pixel & header.mask_g) << lz_g) >> 24,
-							((bmp_pixel & header.mask_b) << lz_b) >> 24,
-							((bmp_pixel & header.mask_a) << lz_a) >> 24
-						};
+						((((bmp_pixel & header.mask_a) << lz_a) >> 24) << 24) |
+						((((bmp_pixel & header.mask_r) << lz_r) >> 24) << 16) |
+						((((bmp_pixel & header.mask_g) << lz_g) >> 24) <<  8) |
+						((((bmp_pixel & header.mask_b) << lz_b) >> 24) <<  0);
 				}
 			}
 		}

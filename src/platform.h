@@ -2,9 +2,9 @@
 #define BUTTON_DOWN(BUTTON)     ((BUTTON) >> 7)
 #define BUTTON_PRESSES(BUTTON)  ((((BUTTON) & 0b01111111) >> 1) + ( BUTTON_DOWN(BUTTON) & ((BUTTON) & 0b1)))
 #define BUTTON_RELEASES(BUTTON) ((((BUTTON) & 0b01111111) >> 1) + (~BUTTON_DOWN(BUTTON) & ((BUTTON) & 0b1)))
-#define BTN_DOWN(BTN)           BUTTON_DOWN(MACRO_CONCAT(platform_input->button, BTN))
-#define BTN_PRESSES(BTN)        BUTTON_PRESSES(MACRO_CONCAT(platform_input->button, BTN))
-#define BTN_RELEASES(BTN)       BUTTON_RELEASES(MACRO_CONCAT(platform_input->button, BTN))
+#define BTN_DOWN(BTN)           BUTTON_DOWN(platform_input->button BTN)
+#define BTN_PRESSES(BTN)        BUTTON_PRESSES(platform_input->button BTN)
+#define BTN_RELEASES(BTN)       BUTTON_RELEASES(platform_input->button BTN)
 #define LTR_DOWN(BTN)           BUTTON_DOWN(platform_input->button.letters[(BTN) - 'a'])
 #define LTR_PRESSES(BTN)        BUTTON_PRESSES(platform_input->button.letters[(BTN) - 'a'])
 #define LTR_RELEASES(BTN)       BUTTON_RELEASES(platform_input->button.letters[(BTN) - 'a'])
@@ -112,13 +112,13 @@ enum struct PlatformUpdateExitCode : u8
 
 // @TODO@ Less generic IO system.
 // @TODO@ Macro that provides where the call was made?
-#define PlatformReadFileData_t(NAME) PlatformFileData NAME(wstrlit platform_file_path)
+#define PlatformReadFileData_t(NAME) PlatformFileData NAME(String platform_file_path)
 typedef PlatformReadFileData_t(PlatformReadFileData_t);
 
 #define PlatformFreeFileData_t(NAME) void NAME(PlatformFileData* platform_file_data)
 typedef PlatformFreeFileData_t(PlatformFreeFileData_t);
 
-#define PlatformWriteFile_t(NAME) bool32 NAME(wstrlit platform_file_path, byte* platform_write_data, u64 platform_write_size)
+#define PlatformWriteFile_t(NAME) bool32 NAME(String platform_file_path, byte* platform_write_data, u64 platform_write_size)
 typedef PlatformWriteFile_t(PlatformWriteFile_t);
 
 #define PlatformUpdate_t(NAME) PlatformUpdateExitCode NAME(PlatformFramebuffer* platform_framebuffer, PlatformInput* platform_input, byte* platform_memory, f32 platform_delta_time, PlatformReadFileData_t PlatformReadFileData, PlatformFreeFileData_t PlatformFreeFileData, PlatformWriteFile_t PlatformWriteFile)

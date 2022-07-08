@@ -59,22 +59,22 @@ global constexpr f32 RAND_TABLE_NORMALIZER =
 		}
 	}();
 
-internal f32 rng(const u32& seed)
+procedure f32 rng(const u32& seed)
 {
 	return RAND_TABLE[seed % ARRAY_CAPACITY(RAND_TABLE)] / RAND_TABLE_NORMALIZER;
 }
 
-internal f32 rng(u32* seed)
+procedure f32 rng(u32* seed)
 {
 	return RAND_TABLE[++*seed % ARRAY_CAPACITY(RAND_TABLE)] / RAND_TABLE_NORMALIZER;
 }
 
-internal i32 rng(u32* seed, const i32& start, const i32& end)
+procedure i32 rng(u32* seed, const i32& start, const i32& end)
 {
 	return static_cast<i32>(rng(seed) * (end - start) + start);
 }
 
-internal f32 rng(u32* seed, const f32& start, const f32& end)
+procedure f32 rng(u32* seed, const f32& start, const f32& end)
 {
 	return rng(seed) * (end - start) + start;
 }
