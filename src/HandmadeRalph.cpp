@@ -4,25 +4,25 @@
 
 #define DEBUG_AUDIO 0
 
-// @TODO@ Memory arena that return 0 if there isn't enough space left?
 // @TODO@ Handle world chunk edges.
 
 constexpr f32 PIXELS_PER_METER = 50.0f;
 constexpr f32 METERS_PER_CHUNK = 16.0f;
 constexpr f32 GRAVITY          = -9.80665f;
 
-struct Wall
+struct Tree
 {
 	vf2 rel_pos;
 	vf2 dims;
+	i32 bmp_index;
 };
 
 struct Chunk
 {
 	bool32 exists;
 	vi2    coords;
-	i32    wall_count;
-	Wall   wall_buffer[128];
+	i32    tree_count;
+	Tree   tree_buffer[128];
 };
 
 struct ChunkNode
@@ -71,6 +71,7 @@ struct State
 			BMP hero_shadow;    // @META@ hero_shadow.bmp
 			BMP background;     // @META@ background.bmp
 			BMP rocks      [4]; // @META@ rock00.bmp         , rock01.bmp          , rock02.bmp          , rock03.bmp
+			BMP trees      [3]; // @META@ tree00.bmp         , tree01.bmp          , tree02.bmp
 		}   bmp;
 		BMP bmps[sizeof(bmp) / sizeof(BMP)];
 	};
@@ -484,9 +485,9 @@ procedure void process_move(Chunk** chunk, vf3* rel_pos, vf3* vel, CollisionShap
 		// @TODO@ This checks chunks in a 3x3 adjacenct fashion. Could be better.
 		FOR_RANGE(i, 9)
 		{
-			Chunk* wall_chunk = get_chunk(state, (*chunk)->coords + vi2 { i % 3 - 1, i / 3 - 1 });
+			Chunk* tree_chunk = get_chunk(state, (*chunk)->coords + vi2 { i % 3 - 1, i / 3 - 1 });
 
-			FOR_ELEMS(wall, wall_chunk->wall_buffer, wall_chunk->wall_count)
+			FOR_ELEMS(tree, tree_chunk->tree_buffer, tree_chunk->tree_count)
 			{
 				result =
 					prioritize_collision_results
@@ -496,12 +497,12 @@ procedure void process_move(Chunk** chunk, vf3* rel_pos, vf3* vel, CollisionShap
 						(
 							displacement.xy,
 							shape,
-							(wall_chunk->coords - (*chunk)->coords) * METERS_PER_CHUNK + wall->rel_pos - rel_pos->xy,
+							(tree_chunk->coords - (*chunk)->coords) * METERS_PER_CHUNK + tree->rel_pos - rel_pos->xy,
 							{
 								.type              = CollisionShapeType::rounded_rectangle,
 								.rounded_rectangle =
 									{
-										.dims    = wall->dims,
+										.dims    = tree->dims,
 										.padding = 0.0f // @TODO@ Rectangle shape type.
 									}
 							}
@@ -724,13 +725,14 @@ PlatformUpdate_t(PlatformUpdate)
 
 			FOR_RANGE(16)
 			{
-				ASSERT(IN_RANGE(chunk->wall_count, 0, ARRAY_CAPACITY(chunk->wall_buffer)));
-				chunk->wall_buffer[chunk->wall_count] =
+				ASSERT(IN_RANGE(chunk->tree_count, 0, ARRAY_CAPACITY(chunk->tree_buffer)));
+				chunk->tree_buffer[chunk->tree_count] =
 					{
-						.rel_pos = vxx(rng(&state->seed, 0, static_cast<i32>(METERS_PER_CHUNK)), rng(&state->seed, 0, static_cast<i32>(METERS_PER_CHUNK - 1))),
-						.dims    = { 1.0f, 1.0f }
+						.rel_pos   = vxx(rng(&state->seed, 0, static_cast<i32>(METERS_PER_CHUNK)), rng(&state->seed, 0, static_cast<i32>(METERS_PER_CHUNK - 1))),
+						.dims      = { 1.0f, 1.0f },
+						.bmp_index = rng(&state->seed, 0, ARRAY_CAPACITY(state->bmp.trees))
 					};
-				chunk->wall_count += 1;
+				chunk->tree_count += 1;
 			}
 
 			if (rng(&state->seed) < 0.5f)
@@ -896,28 +898,30 @@ PlatformUpdate_t(PlatformUpdate)
 
 	draw_bmp(platform_framebuffer, &state->bmp.background, { 0, 0 });
 
-	FOR_ELEMS(chunk_node, state->chunk_node_hash_table) // @TODO@ This is going through the hash table to render. Bad!
-	{
-		if (chunk_node->chunk.exists)
-		{
-			FOR_ELEMS(wall, chunk_node->chunk.wall_buffer, chunk_node->chunk.wall_count)
-			{
-				draw_rect
-				(
-					platform_framebuffer,
-					vxx(((chunk_node->chunk.coords - state->camera_coords) * METERS_PER_CHUNK + wall->rel_pos - state->camera_rel_pos) * PIXELS_PER_METER),
-					vxx(wall->dims * PIXELS_PER_METER),
-					rgba_from(0.15f, 0.225f, 0.2f)
-				);
-			}
-		}
-	}
-
 	lambda screen_coords_of =
 		[&](vi2 chunk_coords, vf3 rel_pos)
 		{
 			return vxx(((chunk_coords - state->camera_coords) * METERS_PER_CHUNK + rel_pos.xy - state->camera_rel_pos + vf2 { 0.0f, 1.0f } * rel_pos.z) * PIXELS_PER_METER);
 		};
+
+	FOR_ELEMS(chunk_node, state->chunk_node_hash_table) // @TODO@ This is going through the hash table to render. Bad!
+	{
+		if (chunk_node->chunk.exists)
+		{
+			FOR_ELEMS(tree, chunk_node->chunk.tree_buffer, chunk_node->chunk.tree_count)
+			{
+				draw_rect
+				(
+					platform_framebuffer,
+					screen_coords_of(chunk_node->chunk.coords, vxx(tree->rel_pos, 0.0f)),
+					vxx(tree->dims * PIXELS_PER_METER),
+					rgba_from(0.25f, 0.825f, 0.4f)
+				);
+				BMP* bmp = &state->bmp.trees[tree->bmp_index];
+				draw_bmp(platform_framebuffer, bmp, screen_coords_of(chunk_node->chunk.coords, vxx(tree->rel_pos + tree->dims / 2.0f, 0.0f)) - vxx(bmp->dims * vf2 { 0.5f, 0.25f }));
+			}
+		}
+	}
 
 	draw_circle
 	(
