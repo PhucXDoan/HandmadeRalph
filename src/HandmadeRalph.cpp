@@ -4,6 +4,8 @@
 
 #define DEBUG_AUDIO 0
 
+global i32 TEMP = 0;
+
 // @TODO@ Handle world chunk edges.
 
 constexpr f32 PIXELS_PER_METER = 50.0f;
@@ -84,12 +86,18 @@ struct State
 	vf3        hero_rel_pos;
 	vf3        hero_vel;
 	Cardinal   hero_cardinal;
+	f32        hero_monstar_contact_t;
 
 	f32        pet_hover_t;
 	Chunk*     pet_chunk;
 	vf3        pet_rel_pos;
 	vf3        pet_vel;
 	Cardinal   pet_cardinal;
+
+	Chunk*     monstar_chunk;
+	vf3        monstar_rel_pos;
+	vf3        monstar_vel;
+	Cardinal   monstar_cardinal;
 
 	Rock       rock_buffer[16];
 	i32        rock_count;
@@ -195,6 +203,19 @@ procedure const CollisionResult& prioritize_collision_results(const CollisionRes
 	return b.type == CollisionType::none || a.type != CollisionType::none && a.priority > b.priority
 		? a
 		: b;
+}
+
+procedure bool32 prioritize_collision_results(CollisionResult* a, const CollisionResult& b)
+{
+	if (b.type == CollisionType::none || a->type != CollisionType::none && a->priority > b.priority)
+	{
+		return false;
+	}
+	else
+	{
+		*a = b;
+		return true;
+	}
 }
 
 procedure CollisionResult collide_against_plane(vf2 displacement, vf2 plane_center, vf2 plane_normal)
@@ -457,6 +478,12 @@ constexpr CollisionShape PET_COLLISION_SHAPE =
 		.circle = { .radius = 0.3f }
 	};
 
+constexpr CollisionShape MONSTAR_COLLISION_SHAPE =
+	{
+		.type   = CollisionShapeType::circle,
+		.circle = { .radius = 0.3f }
+	};
+
 constexpr CollisionShape ROCK_COLLISION_SHAPE =
 	{
 		.type   = CollisionShapeType::circle,
@@ -466,8 +493,10 @@ constexpr CollisionShape ROCK_COLLISION_SHAPE =
 enum struct MoveTag : u8
 {
 	null,
+	tree,
 	hero,
 	pet,
+	monstar,
 	rock
 };
 
@@ -480,7 +509,8 @@ procedure void process_move(Chunk** chunk, vf3* rel_pos, vf3* vel, CollisionShap
 	// @TODO@ Better performing collision.
 	FOR_RANGE(8)
 	{
-		CollisionResult result = {};
+		CollisionResult collision     = {};
+		MoveTag         colliding_tag = {};
 
 		// @TODO@ This checks chunks in a 3x3 adjacenct fashion. Could be better.
 		FOR_RANGE(i, 9)
@@ -489,10 +519,11 @@ procedure void process_move(Chunk** chunk, vf3* rel_pos, vf3* vel, CollisionShap
 
 			FOR_ELEMS(tree, tree_chunk->tree_buffer, tree_chunk->tree_count)
 			{
-				result =
+				if
+				(
 					prioritize_collision_results
 					(
-						result,
+						&collision,
 						collide_shapes
 						(
 							displacement.xy,
@@ -507,7 +538,11 @@ procedure void process_move(Chunk** chunk, vf3* rel_pos, vf3* vel, CollisionShap
 									}
 							}
 						)
-					);
+					)
+				)
+				{
+					colliding_tag = MoveTag::tree;
+				}
 			}
 		}
 
@@ -517,10 +552,11 @@ procedure void process_move(Chunk** chunk, vf3* rel_pos, vf3* vel, CollisionShap
 			{
 				if (IMPLIES(tag == MoveTag::rock, semantic != rock))
 				{
-					result =
+					if
+					(
 						prioritize_collision_results
 						(
-							result,
+							&collision,
 							collide_shapes
 							(
 								displacement.xy,
@@ -528,17 +564,22 @@ procedure void process_move(Chunk** chunk, vf3* rel_pos, vf3* vel, CollisionShap
 								(rock->chunk->coords - (*chunk)->coords) * METERS_PER_CHUNK + rock->rel_pos.xy - rel_pos->xy,
 								ROCK_COLLISION_SHAPE
 							)
-						);
+						)
+					)
+					{
+						colliding_tag = MoveTag::rock;
+					}
 				}
 			}
 		}
 
 		if (tag != MoveTag::hero && tag != MoveTag::rock)
 		{
-			result =
+			if
+			(
 				prioritize_collision_results
 				(
-					result,
+					&collision,
 					collide_shapes
 					(
 						displacement.xy,
@@ -546,15 +587,20 @@ procedure void process_move(Chunk** chunk, vf3* rel_pos, vf3* vel, CollisionShap
 						(state->hero_chunk->coords - (*chunk)->coords) * METERS_PER_CHUNK + state->hero_rel_pos.xy - rel_pos->xy,
 						HERO_COLLISION_SHAPE
 					)
-				);
+				)
+			)
+			{
+				colliding_tag = MoveTag::hero;
+			}
 		}
 
 		if (tag != MoveTag::pet)
 		{
-			result =
+			if
+			(
 				prioritize_collision_results
 				(
-					result,
+					&collision,
 					collide_shapes
 					(
 						displacement.xy,
@@ -562,13 +608,52 @@ procedure void process_move(Chunk** chunk, vf3* rel_pos, vf3* vel, CollisionShap
 						(state->pet_chunk->coords - (*chunk)->coords) * METERS_PER_CHUNK + state->pet_rel_pos.xy - rel_pos->xy,
 						PET_COLLISION_SHAPE
 					)
-				);
+				)
+			)
+			{
+				colliding_tag = MoveTag::pet;
+			}
+		}
+
+		if (tag != MoveTag::monstar)
+		{
+			if
+			(
+				prioritize_collision_results
+				(
+					&collision,
+					collide_shapes
+					(
+						displacement.xy,
+						shape,
+						(state->monstar_chunk->coords - (*chunk)->coords) * METERS_PER_CHUNK + state->monstar_rel_pos.xy - rel_pos->xy,
+						MONSTAR_COLLISION_SHAPE
+					)
+				)
+			)
+			{
+				colliding_tag = MoveTag::monstar;
+			}
+		}
+
+		if (state->hero_monstar_contact_t == 0.0f && tag == MoveTag::hero && colliding_tag == MoveTag::monstar || tag == MoveTag::monstar && colliding_tag == MoveTag::hero)
+		{
+			state->hero_monstar_contact_t = 1.0f;
+
+			vf2 direction_to_monstar = (state->monstar_chunk->coords - state->hero_chunk->coords) * METERS_PER_CHUNK + state->monstar_rel_pos.xy - state->hero_rel_pos.xy;
+			f32 distance_to_monstar  = norm(direction_to_monstar);
+			if (distance_to_monstar > 0.001f)
+			{
+				direction_to_monstar /= distance_to_monstar;
+				state->hero_vel.xy    -= direction_to_monstar * 4.0f;
+				state->monstar_vel.xy += direction_to_monstar * 8.0f;
+			}
 		}
 
 		rel_pos->xy +=
-			result.type == CollisionType::none
+			collision.type == CollisionType::none
 				? displacement.xy
-				: result.new_displacement;
+				: collision.new_displacement;
 
 		vi2 delta_coords = { 0, 0 };
 		if      (rel_pos->x <              0.0f) { delta_coords.x -= 1; }
@@ -591,7 +676,7 @@ procedure void process_move(Chunk** chunk, vf3* rel_pos, vf3* vel, CollisionShap
 			}
 		}
 
-		if (result.type == CollisionType::none)
+		if (collision.type == CollisionType::none)
 		{
 			break;
 		}
@@ -599,13 +684,13 @@ procedure void process_move(Chunk** chunk, vf3* rel_pos, vf3* vel, CollisionShap
 		{
 			if (tag == MoveTag::rock)
 			{
-				vel->xy         = 0.15f * (dot(vel->xy         - result.new_displacement, rotate90(result.normal)) * rotate90(result.normal) * 2.0f + (result.new_displacement - vel->xy   ));
-				displacement.xy = 0.15f * (dot(displacement.xy - result.new_displacement, rotate90(result.normal)) * rotate90(result.normal) * 2.0f + (result.new_displacement - displacement.xy));
+				vel->xy         = 0.15f * (dot(vel->xy         - collision.new_displacement, rotate90(collision.normal)) * rotate90(collision.normal) * 2.0f + (collision.new_displacement - vel->xy        ));
+				displacement.xy = 0.15f * (dot(displacement.xy - collision.new_displacement, rotate90(collision.normal)) * rotate90(collision.normal) * 2.0f + (collision.new_displacement - displacement.xy));
 			}
 			else
 			{
-				vel->xy         = dot(vel->xy         - result.new_displacement, rotate90(result.normal)) * rotate90(result.normal);
-				displacement.xy = dot(displacement.xy - result.new_displacement, rotate90(result.normal)) * rotate90(result.normal);
+				vel->xy         = dot(vel->xy         - collision.new_displacement, rotate90(collision.normal)) * rotate90(collision.normal) + max(dot(vel->xy         - collision.new_displacement, collision.normal), 0.0f) * collision.normal;
+				displacement.xy = dot(displacement.xy - collision.new_displacement, rotate90(collision.normal)) * rotate90(collision.normal) + max(dot(displacement.xy - collision.new_displacement, collision.normal), 0.0f) * collision.normal;
 			}
 
 			displacement.z  = 0.0f;
@@ -750,6 +835,9 @@ PlatformUpdate_t(PlatformUpdate)
 
 		state->pet_chunk   = get_chunk(state, { 0, 0 });
 		state->pet_rel_pos = { 7.0f, 9.0f };
+
+		state->monstar_chunk   = get_chunk(state, { 0, 0 });
+		state->monstar_rel_pos = { 8.0f, 5.0f };
 	}
 
 	//
@@ -806,6 +894,34 @@ PlatformUpdate_t(PlatformUpdate)
 		state->pet_vel.xy = dampen(state->pet_vel.xy, target_pet_vel, 0.1f, platform_delta_time);
 
 		process_move(&state->pet_chunk, &state->pet_rel_pos, &state->pet_vel, PET_COLLISION_SHAPE, MoveTag::pet, 0, state, platform_delta_time);
+	}
+
+	//
+	// Update Monstar.
+	//
+
+	{
+		vf2 target_monstar_vel   = { 0.0f, 0.0f };
+		vf2 ray_to_hero      = (state->hero_chunk->coords - state->monstar_chunk->coords) * METERS_PER_CHUNK + state->hero_rel_pos.xy - state->monstar_rel_pos.xy;
+		f32 distance_to_hero = norm(ray_to_hero);
+		if (IN_RANGE(distance_to_hero, 0.1f, 10.0f))
+		{
+			target_monstar_vel = ray_to_hero / distance_to_hero * 4.0f;
+		}
+
+		state->monstar_vel.xy = dampen(state->monstar_vel.xy, target_monstar_vel, 0.4f, platform_delta_time);
+
+		f32 monster_speed = norm(state->monstar_vel.xy);
+		if (monster_speed > 0.01f)
+		{
+			vf2 direction = state->monstar_vel.xy / monster_speed;
+			if      (direction.x < -1.0f / SQRT2) { state->monstar_cardinal = Cardinal_left;  }
+			else if (direction.x >  1.0f / SQRT2) { state->monstar_cardinal = Cardinal_right; }
+			else if (direction.y < -1.0f / SQRT2) { state->monstar_cardinal = Cardinal_down;  }
+			else if (direction.y >  1.0f / SQRT2) { state->monstar_cardinal = Cardinal_up;    }
+		}
+
+		process_move(&state->monstar_chunk, &state->monstar_rel_pos, &state->monstar_vel, PET_COLLISION_SHAPE, MoveTag::monstar, 0, state, platform_delta_time);
 	}
 
 	//
@@ -923,15 +1039,15 @@ PlatformUpdate_t(PlatformUpdate)
 		}
 	}
 
-	draw_circle
-	(
-		platform_framebuffer,
-		screen_coords_of(state->hero_chunk->coords, state->hero_rel_pos),
-		static_cast<i32>(HERO_COLLISION_SHAPE.circle.radius * PIXELS_PER_METER),
-		rgba_from(0.9f, 0.5f, 0.1f)
-	);
-
 	{
+		draw_circle
+		(
+			platform_framebuffer,
+			screen_coords_of(state->hero_chunk->coords, state->hero_rel_pos),
+			static_cast<i32>(HERO_COLLISION_SHAPE.circle.radius * PIXELS_PER_METER),
+			rgba_from(0.9f, 0.5f, 0.1f)
+		);
+
 		vi2 hero_screen_coords = screen_coords_of(state->hero_chunk->coords, state->hero_rel_pos) - vxx(state->bmp.hero_torsos[0].dims * vf2 { 0.5f, 0.225f });
 		draw_bmp(platform_framebuffer, &state->bmp.hero_shadow, hero_screen_coords);
 		draw_bmp(platform_framebuffer, &state->bmp.hero_torsos[state->hero_cardinal], hero_screen_coords);
@@ -939,18 +1055,32 @@ PlatformUpdate_t(PlatformUpdate)
 		draw_bmp(platform_framebuffer, &state->bmp.hero_heads [state->hero_cardinal], hero_screen_coords);
 	}
 
-	draw_circle
-	(
-		platform_framebuffer,
-		screen_coords_of(state->pet_chunk->coords, state->pet_rel_pos),
-		static_cast<i32>(PET_COLLISION_SHAPE.circle.radius * PIXELS_PER_METER),
-		rgba_from(0.9f, 0.5f, 0.8f)
-	);
-
 	{
+		draw_circle
+		(
+			platform_framebuffer,
+			screen_coords_of(state->pet_chunk->coords, state->pet_rel_pos),
+			static_cast<i32>(PET_COLLISION_SHAPE.circle.radius * PIXELS_PER_METER),
+			rgba_from(0.9f, 0.5f, 0.8f)
+		);
+
 		vi2 pet_screen_coords = screen_coords_of(state->pet_chunk->coords, state->pet_rel_pos) - vxx(state->bmp.hero_torsos[0].dims * vf2 { 0.5f, 0.225f });
 		draw_bmp(platform_framebuffer, &state->bmp.hero_shadow, pet_screen_coords);
 		draw_bmp(platform_framebuffer, &state->bmp.hero_heads[state->pet_cardinal], vxx(pet_screen_coords + vf2 { 0.0f, -0.4f * (1.0f - cosf(state->pet_hover_t * TAU)) / 2.0f } * PIXELS_PER_METER));
+	}
+
+	{
+		draw_circle
+		(
+			platform_framebuffer,
+			screen_coords_of(state->monstar_chunk->coords, state->monstar_rel_pos),
+			static_cast<i32>(PET_COLLISION_SHAPE.circle.radius * PIXELS_PER_METER),
+			rgba_from(0.5f, 0.1f, 0.1f)
+		);
+
+		vi2 monstar_screen_coords = screen_coords_of(state->monstar_chunk->coords, state->monstar_rel_pos) - vxx(state->bmp.hero_torsos[0].dims * vf2 { 0.5f, 0.225f });
+		draw_bmp(platform_framebuffer, &state->bmp.hero_shadow, monstar_screen_coords);
+		draw_bmp(platform_framebuffer, &state->bmp.hero_heads[state->monstar_cardinal], monstar_screen_coords);
 	}
 
 	FOR_ELEMS(rock, state->rock_buffer, state->rock_count)
@@ -981,6 +1111,8 @@ PlatformUpdate_t(PlatformUpdate)
 	state->hertz = 512.0f + platform_input->gamepads[0].stick_right.y * 100.0f;
 	state->t     = mod(state->t, TAU);
 	#endif
+
+	state->hero_monstar_contact_t = clamp(state->hero_monstar_contact_t - platform_delta_time / 0.2f, 0.0f, 1.0f);
 
 	return PlatformUpdateExitCode::normal;
 }
