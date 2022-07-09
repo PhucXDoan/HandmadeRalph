@@ -488,12 +488,12 @@ procedure constexpr vi3    vxx(const f32& x, const f32& y, const f32& z         
 procedure constexpr vf4    vxx(const i32& x, const i32& y, const i32& z, const i32& w) { return { static_cast<f32>(  x), static_cast<f32>(  y), static_cast<f32>(  z), static_cast<f32>(  w) }; }
 procedure constexpr vi4    vxx(const f32& x, const f32& y, const f32& z, const f32& w) { return { static_cast<i32>(  x), static_cast<i32>(  y), static_cast<i32>(  z), static_cast<i32>(  w) }; }
 
-procedure constexpr vf3    vxx(const vf2& v,               const f32& z              ) { return {                  v.x ,                  v.y ,                    z                         }; }
-procedure constexpr vi3    vxx(const vi2& v,               const i32& z              ) { return {                  v.x ,                  v.y ,                    z                         }; }
-procedure constexpr vf4    vxx(const vf2& v,               const f32& z, const f32& w) { return {                  v.x ,                  v.y ,                    z ,                    w  }; }
-procedure constexpr vi4    vxx(const vi2& v,               const i32& z, const i32& w) { return {                  v.x ,                  v.y ,                    z ,                    w  }; }
-procedure constexpr vf4    vxx(const vf3& v,                             const f32& w) { return {                  v.x ,                  v.y ,                  v.z ,                    w  }; }
-procedure constexpr vi4    vxx(const vi3& v,                             const i32& w) { return {                  v.x ,                  v.y ,                  v.z ,                    w  }; }
+procedure constexpr vf3    vxn(const vf2& v,               const f32& z              ) { return { v.x, v.y,   z      }; }
+procedure constexpr vi3    vxn(const vi2& v,               const i32& z              ) { return { v.x, v.y,   z      }; }
+procedure constexpr vf4    vxn(const vf2& v,               const f32& z, const f32& w) { return { v.x, v.y,   z,   w }; }
+procedure constexpr vi4    vxn(const vi2& v,               const i32& z, const i32& w) { return { v.x, v.y,   z,   w }; }
+procedure constexpr vf4    vxn(const vf3& v,                             const f32& w) { return { v.x, v.y, v.z,   w }; }
+procedure constexpr vi4    vxn(const vi3& v,                             const i32& w) { return { v.x, v.y, v.z,   w }; }
 
 procedure constexpr vf2    vx2(const f32& n) { return { n, n       }; }
 procedure constexpr vi2    vx2(const i32& n) { return { n, n       }; }
