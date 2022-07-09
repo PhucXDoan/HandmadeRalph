@@ -87,17 +87,20 @@ struct State
 	vf3        hero_vel;
 	Cardinal   hero_cardinal;
 	f32        hero_monstar_contact_t;
+	i32        hero_hp;
 
 	f32        pet_hover_t;
 	Chunk*     pet_chunk;
 	vf3        pet_rel_pos;
 	vf3        pet_vel;
 	Cardinal   pet_cardinal;
+	i32        pet_hp;
 
 	Chunk*     monstar_chunk;
 	vf3        monstar_rel_pos;
 	vf3        monstar_vel;
 	Cardinal   monstar_cardinal;
+	i32        monstar_hp;
 
 	Rock       rock_buffer[16];
 	i32        rock_count;
@@ -137,7 +140,7 @@ procedure void draw_rect(PlatformFramebuffer* platform_framebuffer, vi2 bottom_l
 	}
 }
 
-procedure void draw_bmp(PlatformFramebuffer* platform_framebuffer, BMP* bmp, vi2 bottom_left)
+procedure void draw_bmp(PlatformFramebuffer* platform_framebuffer, BMP* bmp, vi2 bottom_left, f32 alpha = 1.0f)
 {
 	FOR_RANGE(y, max(platform_framebuffer->dims.y - bottom_left.y - bmp->dims.y, 0), min(platform_framebuffer->dims.y - bottom_left.y, platform_framebuffer->dims.y))
 	{
@@ -153,9 +156,9 @@ procedure void draw_bmp(PlatformFramebuffer* platform_framebuffer, BMP* bmp, vi2
 			else if (top >> 24)
 			{
 				dst =
-					(static_cast<u32>(static_cast<u8>(static_cast<f32>((dst >> 16) & 255) * (1.0f - ((top >> 24) & 255) / 255.0f) + static_cast<f32>((top >> 16) & 255) * ((top >> 24) & 255) / 255.0f)) << 16) |
-					(static_cast<u32>(static_cast<u8>(static_cast<f32>((dst >>  8) & 255) * (1.0f - ((top >> 24) & 255) / 255.0f) + static_cast<f32>((top >>  8) & 255) * ((top >> 24) & 255) / 255.0f)) <<  8) |
-					(static_cast<u32>(static_cast<u8>(static_cast<f32>((dst >>  0) & 255) * (1.0f - ((top >> 24) & 255) / 255.0f) + static_cast<f32>((top >>  0) & 255) * ((top >> 24) & 255) / 255.0f)) <<  0);
+					(static_cast<u32>(static_cast<u8>(static_cast<f32>((dst >> 16) & 255) * (1.0f - ((top >> 24) & 255) / 255.0f * alpha) + static_cast<f32>((top >> 16) & 255) * ((top >> 24) & 255) / 255.0f * alpha)) << 16) |
+					(static_cast<u32>(static_cast<u8>(static_cast<f32>((dst >>  8) & 255) * (1.0f - ((top >> 24) & 255) / 255.0f * alpha) + static_cast<f32>((top >>  8) & 255) * ((top >> 24) & 255) / 255.0f * alpha)) <<  8) |
+					(static_cast<u32>(static_cast<u8>(static_cast<f32>((dst >>  0) & 255) * (1.0f - ((top >> 24) & 255) / 255.0f * alpha) + static_cast<f32>((top >>  0) & 255) * ((top >> 24) & 255) / 255.0f * alpha)) <<  0);
 			}
 		}
 	}
@@ -636,7 +639,7 @@ procedure void process_move(Chunk** chunk, vf3* rel_pos, vf3* vel, CollisionShap
 			}
 		}
 
-		if (state->hero_monstar_contact_t == 0.0f && tag == MoveTag::hero && colliding_tag == MoveTag::monstar || tag == MoveTag::monstar && colliding_tag == MoveTag::hero)
+		if (state->hero_monstar_contact_t == 0.0f && (tag == MoveTag::hero && colliding_tag == MoveTag::monstar || tag == MoveTag::monstar && colliding_tag == MoveTag::hero))
 		{
 			state->hero_monstar_contact_t = 1.0f;
 
@@ -645,8 +648,11 @@ procedure void process_move(Chunk** chunk, vf3* rel_pos, vf3* vel, CollisionShap
 			if (distance_to_monstar > 0.001f)
 			{
 				direction_to_monstar /= distance_to_monstar;
-				state->hero_vel.xy    -= direction_to_monstar * 4.0f;
+				state->hero_vel.xy -= direction_to_monstar * 4.0f;
+				state->hero_vel.z  += 3.0f;
+
 				state->monstar_vel.xy += direction_to_monstar * 8.0f;
+				state->monstar_vel.z  += 8.0f;
 			}
 		}
 
@@ -667,8 +673,11 @@ procedure void process_move(Chunk** chunk, vf3* rel_pos, vf3* vel, CollisionShap
 		rel_pos->z += displacement.z;
 		if (rel_pos->z <= 0.0f)
 		{
-			rel_pos->z  = 0.0f;
-			vel->z     *= -0.35f;
+			rel_pos->z = 0.0f;
+			if (vel->z < 0.0f)
+			{
+				vel->z = vel->z * -0.35f;
+			}
 
 			if (tag == MoveTag::rock)
 			{
@@ -831,17 +840,20 @@ PlatformUpdate_t(PlatformUpdate)
 		}
 
 		state->hero_chunk   = get_chunk(state, { 0, 0 });
-		state->hero_rel_pos = { 5.0f, 7.0f };
+		state->hero_rel_pos = { 5.0f, 7.0f, 0.0f };
+		state->hero_hp      = 4;
 
 		state->pet_chunk   = get_chunk(state, { 0, 0 });
-		state->pet_rel_pos = { 7.0f, 9.0f };
+		state->pet_rel_pos = { 7.0f, 9.0f, 0.0f };
+		state->pet_hp      = 3;
 
 		state->monstar_chunk   = get_chunk(state, { 0, 0 });
-		state->monstar_rel_pos = { 8.0f, 5.0f };
+		state->monstar_rel_pos = { 8.0f, 5.0f, 0.0f };
+		state->monstar_hp      = 2;
 	}
 
 	//
-	// Update Hero.
+	// Update hero.
 	//
 
 	{
@@ -867,7 +879,7 @@ PlatformUpdate_t(PlatformUpdate)
 	}
 
 	//
-	// Update Pet.
+	// Update pet.
 	//
 
 	state->pet_hover_t = mod(state->pet_hover_t + platform_delta_time / 4.0f, 1.0f);
@@ -892,12 +904,13 @@ PlatformUpdate_t(PlatformUpdate)
 		}
 
 		state->pet_vel.xy = dampen(state->pet_vel.xy, target_pet_vel, 0.1f, platform_delta_time);
+		state->pet_vel.z  = dampen(state->pet_vel.z, (2.0f + sinf(state->pet_hover_t * TAU) * 0.25f - state->pet_rel_pos.z) * 8.0f, 0.01f, platform_delta_time);
 
 		process_move(&state->pet_chunk, &state->pet_rel_pos, &state->pet_vel, PET_COLLISION_SHAPE, MoveTag::pet, 0, state, platform_delta_time);
 	}
 
 	//
-	// Update Monstar.
+	// Update monstar.
 	//
 
 	{
@@ -910,11 +923,12 @@ PlatformUpdate_t(PlatformUpdate)
 		}
 
 		state->monstar_vel.xy = dampen(state->monstar_vel.xy, target_monstar_vel, 0.4f, platform_delta_time);
+		state->monstar_vel.z  = dampen(state->monstar_vel.z, (2.0f - state->monstar_rel_pos.z) * 8.0f, 0.01f, platform_delta_time);
 
-		f32 monster_speed = norm(state->monstar_vel.xy);
-		if (monster_speed > 0.01f)
+		f32 monstar_speed = norm(state->monstar_vel.xy);
+		if (monstar_speed > 0.01f)
 		{
-			vf2 direction = state->monstar_vel.xy / monster_speed;
+			vf2 direction = state->monstar_vel.xy / monstar_speed;
 			if      (direction.x < -1.0f / SQRT2) { state->monstar_cardinal = Cardinal_left;  }
 			else if (direction.x >  1.0f / SQRT2) { state->monstar_cardinal = Cardinal_right; }
 			else if (direction.y < -1.0f / SQRT2) { state->monstar_cardinal = Cardinal_down;  }
@@ -1020,6 +1034,23 @@ PlatformUpdate_t(PlatformUpdate)
 			return vxx(((chunk_coords - state->camera_coords) * METERS_PER_CHUNK + rel_pos.xy - state->camera_rel_pos + vf2 { 0.0f, 1.0f } * rel_pos.z) * PIXELS_PER_METER);
 		};
 
+	lambda draw_thing =
+		[&](vi2 chunk_coords, vf3 rel_pos, vf2 center, BMP* bmp)
+		{
+			f32 alpha = 1.0f;
+			if (bmp == &state->bmp.hero_shadow)
+			{
+				alpha     = square(clamp(1.0f - rel_pos.z / 12.0f, 0.0f, 1.0f));
+				rel_pos.z = 0.0f;
+			}
+
+			draw_bmp(platform_framebuffer, bmp, screen_coords_of(chunk_coords, rel_pos) - vxx(bmp->dims * center), alpha);
+		};
+
+	//
+	// Render trees.
+	//
+
 	FOR_ELEMS(chunk_node, state->chunk_node_hash_table) // @TODO@ This is going through the hash table to render. Bad!
 	{
 		if (chunk_node->chunk.exists)
@@ -1033,55 +1064,67 @@ PlatformUpdate_t(PlatformUpdate)
 					vxx(tree->dims * PIXELS_PER_METER),
 					rgba_from(0.25f, 0.825f, 0.4f)
 				);
-				BMP* bmp = &state->bmp.trees[tree->bmp_index];
-				draw_bmp(platform_framebuffer, bmp, screen_coords_of(chunk_node->chunk.coords, vxx(tree->rel_pos + tree->dims / 2.0f, 0.0f)) - vxx(bmp->dims * vf2 { 0.5f, 0.25f }));
+				draw_thing(chunk_node->chunk.coords, vxx(tree->rel_pos + tree->dims / 2.0f, 0.0f), { 0.5f, 0.3f }, &state->bmp.trees[tree->bmp_index]);
 			}
 		}
 	}
 
+	//
+	// Render hero.
+	//
+
 	{
 		draw_circle
 		(
 			platform_framebuffer,
-			screen_coords_of(state->hero_chunk->coords, state->hero_rel_pos),
+			screen_coords_of(state->hero_chunk->coords, vxx(state->hero_rel_pos.xy, 0.0f)),
 			static_cast<i32>(HERO_COLLISION_SHAPE.circle.radius * PIXELS_PER_METER),
 			rgba_from(0.9f, 0.5f, 0.1f)
 		);
 
-		vi2 hero_screen_coords = screen_coords_of(state->hero_chunk->coords, state->hero_rel_pos) - vxx(state->bmp.hero_torsos[0].dims * vf2 { 0.5f, 0.225f });
-		draw_bmp(platform_framebuffer, &state->bmp.hero_shadow, hero_screen_coords);
-		draw_bmp(platform_framebuffer, &state->bmp.hero_torsos[state->hero_cardinal], hero_screen_coords);
-		draw_bmp(platform_framebuffer, &state->bmp.hero_capes [state->hero_cardinal], hero_screen_coords);
-		draw_bmp(platform_framebuffer, &state->bmp.hero_heads [state->hero_cardinal], hero_screen_coords);
+		draw_thing(state->hero_chunk->coords, state->hero_rel_pos, { 0.48f, 0.225f }, &state->bmp.hero_shadow                      );
+		draw_thing(state->hero_chunk->coords, state->hero_rel_pos, { 0.48f, 0.225f }, &state->bmp.hero_torsos[state->hero_cardinal]);
+		draw_thing(state->hero_chunk->coords, state->hero_rel_pos, { 0.48f, 0.225f }, &state->bmp.hero_capes [state->hero_cardinal]);
+		draw_thing(state->hero_chunk->coords, state->hero_rel_pos, { 0.48f, 0.225f }, &state->bmp.hero_heads [state->hero_cardinal]);
 	}
+
+	//
+	// Render pet.
+	//
 
 	{
 		draw_circle
 		(
 			platform_framebuffer,
-			screen_coords_of(state->pet_chunk->coords, state->pet_rel_pos),
+			screen_coords_of(state->pet_chunk->coords, vxx(state->pet_rel_pos.xy, 0.0f)),
 			static_cast<i32>(PET_COLLISION_SHAPE.circle.radius * PIXELS_PER_METER),
 			rgba_from(0.9f, 0.5f, 0.8f)
 		);
 
-		vi2 pet_screen_coords = screen_coords_of(state->pet_chunk->coords, state->pet_rel_pos) - vxx(state->bmp.hero_torsos[0].dims * vf2 { 0.5f, 0.225f });
-		draw_bmp(platform_framebuffer, &state->bmp.hero_shadow, pet_screen_coords);
-		draw_bmp(platform_framebuffer, &state->bmp.hero_heads[state->pet_cardinal], vxx(pet_screen_coords + vf2 { 0.0f, -0.4f * (1.0f - cosf(state->pet_hover_t * TAU)) / 2.0f } * PIXELS_PER_METER));
+		draw_thing(state->pet_chunk->coords, state->pet_rel_pos, { 0.48f, 0.225f }, &state->bmp.hero_shadow                    );
+		draw_thing(state->pet_chunk->coords, state->pet_rel_pos, { 0.48f, 0.550f }, &state->bmp.hero_heads[state->pet_cardinal]);
 	}
+
+	//
+	// Render monster.
+	//
 
 	{
 		draw_circle
 		(
 			platform_framebuffer,
-			screen_coords_of(state->monstar_chunk->coords, state->monstar_rel_pos),
+			screen_coords_of(state->monstar_chunk->coords, vxx(state->monstar_rel_pos.xy, 0.0f)),
 			static_cast<i32>(PET_COLLISION_SHAPE.circle.radius * PIXELS_PER_METER),
 			rgba_from(0.5f, 0.1f, 0.1f)
 		);
 
-		vi2 monstar_screen_coords = screen_coords_of(state->monstar_chunk->coords, state->monstar_rel_pos) - vxx(state->bmp.hero_torsos[0].dims * vf2 { 0.5f, 0.225f });
-		draw_bmp(platform_framebuffer, &state->bmp.hero_shadow, monstar_screen_coords);
-		draw_bmp(platform_framebuffer, &state->bmp.hero_heads[state->monstar_cardinal], monstar_screen_coords);
+		draw_thing(state->monstar_chunk->coords, state->monstar_rel_pos, { 0.48f, 0.225f }, &state->bmp.hero_shadow                        );
+		draw_thing(state->monstar_chunk->coords, state->monstar_rel_pos, { 0.48f, 0.550f }, &state->bmp.hero_heads[state->monstar_cardinal]);
 	}
+
+	//
+	// Render rocks.
+	//
 
 	FOR_ELEMS(rock, state->rock_buffer, state->rock_count)
 	{
