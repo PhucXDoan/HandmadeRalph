@@ -71,7 +71,7 @@ procedure PlatformReadFileData_t(PlatformReadFileData)
 		return {};
 	}
 
-	HANDLE handle = CreateFileW(wide_file_path, GENERIC_READ, FILE_SHARE_READ, {}, OPEN_EXISTING, 0, {});
+	HANDLE handle = CreateFileW(wide_file_path, GENERIC_READ, FILE_SHARE_READ, 0, OPEN_EXISTING, 0, 0);
 	if (handle == INVALID_HANDLE_VALUE)
 	{
 		DEBUG_printf(__FILE__ " :: %s :: Failed to open file `%S` for reading.\n", __func__, wide_file_path);
@@ -89,7 +89,7 @@ procedure PlatformReadFileData_t(PlatformReadFileData)
 	PlatformFileData platform_file_data =
 		{
 			.size = static_cast<u64>(file_size.QuadPart),
-			.data = reinterpret_cast<byte*>(VirtualAlloc({}, static_cast<SIZE_T>(file_size.QuadPart), MEM_COMMIT, PAGE_READWRITE))
+			.data = reinterpret_cast<byte*>(VirtualAlloc(0, static_cast<SIZE_T>(file_size.QuadPart), MEM_COMMIT, PAGE_READWRITE))
 		};
 
 	// @TODO@ Larger file sizes.
@@ -106,7 +106,7 @@ procedure PlatformReadFileData_t(PlatformReadFileData)
 	}
 
 	DWORD read_size;
-	if (!ReadFile(handle, platform_file_data.data, static_cast<u32>(platform_file_data.size), &read_size, {}))
+	if (!ReadFile(handle, platform_file_data.data, static_cast<u32>(platform_file_data.size), &read_size, 0))
 	{
 		DEBUG_printf(__FILE__ " :: %s :: Failed to read file `%S`.\n", __func__, wide_file_path);
 		VirtualFree(platform_file_data.data, 0, MEM_RELEASE);
@@ -141,7 +141,7 @@ procedure PlatformWriteFile_t(PlatformWriteFile)
 		return {};
 	}
 
-	HANDLE handle = CreateFileW(wide_file_path, GENERIC_WRITE, 0, {}, CREATE_ALWAYS, 0, {});
+	HANDLE handle = CreateFileW(wide_file_path, GENERIC_WRITE, 0, 0, CREATE_ALWAYS, 0, 0);
 	if (handle == INVALID_HANDLE_VALUE)
 	{
 		DEBUG_printf(__FILE__ " :: %s :: Failed to open file `%S` for writing.\n", __func__, wide_file_path);
@@ -157,7 +157,7 @@ procedure PlatformWriteFile_t(PlatformWriteFile)
 	}
 
 	DWORD write_size;
-	if (!WriteFile(handle, platform_write_data, static_cast<u32>(platform_write_size), &write_size, {}))
+	if (!WriteFile(handle, platform_write_data, static_cast<u32>(platform_write_size), &write_size, 0))
 	{
 		DEBUG_printf(__FILE__ " :: %s :: Failed to write into `%S`.\n", __func__, wide_file_path);
 		return false;
@@ -289,7 +289,7 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int cmd_show)
 			.style         = CS_HREDRAW | CS_VREDRAW,
 			.lpfnWndProc   = window_procedure_callback,
 			.hInstance     = instance,
-			.hCursor       = LoadCursor({}, IDC_CROSS),
+			.hCursor       = LoadCursor(0, IDC_CROSS),
 			.lpszClassName = CLASS_NAME
 		};
 
@@ -320,10 +320,10 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int cmd_show)
 				DEBUG ? 256 : CW_USEDEFAULT,
 				rect.right  - rect.left,
 				rect.bottom - rect.top,
-				{},
-				{},
+				0,
+				0,
 				instance,
-				{}
+				0
 			);
 	}
 	if (!window)
@@ -376,7 +376,7 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int cmd_show)
 		ASSERT(l_DirectSoundCreate);
 
 		IDirectSound* directsound;
-		if (l_DirectSoundCreate({}, &directsound, {}) != DS_OK)
+		if (l_DirectSoundCreate(0, &directsound, 0) != DS_OK)
 		{
 			DEBUG_printf(__FILE__ " :: DirectSound :: Failed to create object.\n");
 			return -1;
@@ -394,7 +394,7 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int cmd_show)
 				.dwFlags = DSBCAPS_PRIMARYBUFFER
 			};
 		IDirectSoundBuffer* primary_buffer;
-		if (directsound->CreateSoundBuffer(&primary_buffer_description, &primary_buffer, {}) != DS_OK)
+		if (directsound->CreateSoundBuffer(&primary_buffer_description, &primary_buffer, 0) != DS_OK)
 		{
 			DEBUG_printf(__FILE__ " :: DirectSound :: Failed to create primary buffer.\n");
 			return -1;
@@ -419,7 +419,7 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int cmd_show)
 				.dwBufferBytes = SOUNDBUFFER_SIZE,
 				.lpwfxFormat   = &primary_buffer_format
 			};
-		if (directsound->CreateSoundBuffer(&secondary_buffer_description, &directsound_buffer, {}) != DS_OK)
+		if (directsound->CreateSoundBuffer(&secondary_buffer_description, &directsound_buffer, 0) != DS_OK)
 		{
 			DEBUG_printf(__FILE__ " :: DirectSound :: Failed to create secondary buffer.\n");
 			return -1;
@@ -478,13 +478,13 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int cmd_show)
 	constexpr i32 SAMPLES_OF_LATENCY              = max(MAXIMUM_SAMPLES_PER_UPDATE, SAMPLES_PER_SECOND / 30);
 	constexpr i32 PLATFORM_SAMPLE_BUFFER_CAPACITY = 4 * MAXIMUM_SAMPLES_PER_UPDATE;
 
-	byte*           backbuffer_bitmap_data = reinterpret_cast<byte*>(VirtualAlloc({}, static_cast<size_t>(4) * BACKBUFFER_BITMAP_INFO.bmiHeader.biWidth * -BACKBUFFER_BITMAP_INFO.bmiHeader.biHeight, MEM_COMMIT, PAGE_READWRITE));
-	PlatformSample* platform_sample_buffer = reinterpret_cast<PlatformSample*>(VirtualAlloc({}, PLATFORM_SAMPLE_BUFFER_CAPACITY * sizeof(PlatformSample), MEM_COMMIT, PAGE_READWRITE));
+	byte*           backbuffer_bitmap_data = reinterpret_cast<byte*>(VirtualAlloc(0, static_cast<size_t>(4) * BACKBUFFER_BITMAP_INFO.bmiHeader.biWidth * -BACKBUFFER_BITMAP_INFO.bmiHeader.biHeight, MEM_COMMIT, PAGE_READWRITE));
+	PlatformSample* platform_sample_buffer = reinterpret_cast<PlatformSample*>(VirtualAlloc(0, PLATFORM_SAMPLE_BUFFER_CAPACITY * sizeof(PlatformSample), MEM_COMMIT, PAGE_READWRITE));
 	byte*           platform_memory        =
 		#if DEBUG
 		reinterpret_cast<byte*>(VirtualAlloc(reinterpret_cast<void*>(TEBIBYTES_OF(8)), PLATFORM_MEMORY_SIZE, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE));
 		#else
-		reinterpret_cast<byte*>(VirtualAlloc({}, PLATFORM_MEMORY_SIZE, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE));
+		reinterpret_cast<byte*>(VirtualAlloc(0, PLATFORM_MEMORY_SIZE, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE));
 		#endif
 
 	ASSERT(backbuffer_bitmap_data);
@@ -514,7 +514,7 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int cmd_show)
 		// Input.
 		//
 
-		for (MSG message; PeekMessageW(&message, {}, 0, 0, PM_REMOVE);)
+		for (MSG message; PeekMessageW(&message, 0, 0, 0, PM_REMOVE);)
 		{
 			TranslateMessage(&message);
 			DispatchMessage(&message);
@@ -645,7 +645,7 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int cmd_show)
 				DEBUG_persist PlaybackState playback_state        = PlaybackState::null;
 				DEBUG_persist HANDLE        playback_file         = INVALID_HANDLE_VALUE;
 				DEBUG_persist HANDLE        playback_file_mapping = INVALID_HANDLE_VALUE;
-				DEBUG_persist byte*         playback_data         = {};
+				DEBUG_persist byte*         playback_data         = 0;
 				DEBUG_persist u64           playback_size         = 0;
 				DEBUG_persist i32           playback_input_index  = 0;
 
@@ -667,7 +667,7 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int cmd_show)
 						if (playback_data)
 						{
 							UnmapViewOfFile(playback_data);
-							playback_data = {};
+							playback_data = 0;
 						}
 					};
 
@@ -677,7 +677,7 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int cmd_show)
 					{
 						if (playback_state == PlaybackState::null)
 						{
-							playback_file = CreateFileW(PLAYBACK_FILE_PATH, GENERIC_READ, 0, {}, OPEN_EXISTING, 0, {});
+							playback_file = CreateFileW(PLAYBACK_FILE_PATH, GENERIC_READ, 0, 0, OPEN_EXISTING, 0, 0);
 							if (playback_file == INVALID_HANDLE_VALUE)
 							{
 								DEBUG_printf(__FILE__ " :: Failed to reload `%S` for playback.\n", PLAYBACK_FILE_PATH);
@@ -685,7 +685,7 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int cmd_show)
 								goto ABORT_PLAYBACK;
 							}
 
-							playback_file_mapping = CreateFileMappingW(playback_file, {}, PAGE_READONLY, 0, 0, {});
+							playback_file_mapping = CreateFileMappingW(playback_file, 0, PAGE_READONLY, 0, 0, 0);
 							if (playback_file_mapping == INVALID_HANDLE_VALUE)
 							{
 								DEBUG_printf(__FILE__ " :: Failed to file map `%S`; aborting reloaded playback.\n", PLAYBACK_FILE_PATH);
@@ -734,7 +734,7 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int cmd_show)
 							{
 								playback_state = PlaybackState::recording;
 
-								playback_file = CreateFileW(PLAYBACK_FILE_PATH, GENERIC_READ | GENERIC_WRITE, 0, {}, CREATE_ALWAYS, 0, {});
+								playback_file = CreateFileW(PLAYBACK_FILE_PATH, GENERIC_READ | GENERIC_WRITE, 0, 0, CREATE_ALWAYS, 0, 0);
 								if (playback_file == INVALID_HANDLE_VALUE)
 								{
 									DEBUG_printf(__FILE__ " :: Failed to create `%S` for playback.\n", PLAYBACK_FILE_PATH);
@@ -743,7 +743,7 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int cmd_show)
 								}
 
 								DWORD resulting_write_size;
-								if (!WriteFile(playback_file, platform_memory, PLATFORM_MEMORY_SIZE, &resulting_write_size, {}) || resulting_write_size != PLATFORM_MEMORY_SIZE)
+								if (!WriteFile(playback_file, platform_memory, PLATFORM_MEMORY_SIZE, &resulting_write_size, 0) || resulting_write_size != PLATFORM_MEMORY_SIZE)
 								{
 									DEBUG_printf(__FILE__ " :: Recorded `%lu` out of `%zu` bytes of memory to `%S`; aborting playback.\n", resulting_write_size, PLATFORM_MEMORY_SIZE, PLAYBACK_FILE_PATH);
 									stop_playback();
@@ -757,7 +757,7 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int cmd_show)
 							{
 								playback_state = PlaybackState::replaying;
 
-								playback_file_mapping = CreateFileMappingW(playback_file, {}, PAGE_READONLY, 0, 0, {});
+								playback_file_mapping = CreateFileMappingW(playback_file, 0, PAGE_READONLY, 0, 0, 0);
 								if (playback_file_mapping == INVALID_HANDLE_VALUE)
 								{
 									DEBUG_printf(__FILE__ " :: Failed to file map `%S`; aborting playback.\n", PLAYBACK_FILE_PATH);
@@ -806,7 +806,7 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int cmd_show)
 				if (playback_state == PlaybackState::recording)
 				{
 					DWORD resulting_write_size;
-					if (!WriteFile(playback_file, &g_platform_input, sizeof(PlatformInput), &resulting_write_size, {}) || resulting_write_size != sizeof(PlatformInput))
+					if (!WriteFile(playback_file, &g_platform_input, sizeof(PlatformInput), &resulting_write_size, 0) || resulting_write_size != sizeof(PlatformInput))
 					{
 						DEBUG_printf(__FILE__ " :: Recorded `%lu` out of `%zu` bytes of input to `%S`; aborting playback.\n", resulting_write_size, sizeof(PlatformInput), PLAYBACK_FILE_PATH);
 						stop_playback();

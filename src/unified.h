@@ -243,7 +243,7 @@ procedure TYPE* allocate(MemoryArena* arena, const u64& count = 1)
 	}
 	else
 	{
-		return {};
+		return 0;
 	}
 }
 

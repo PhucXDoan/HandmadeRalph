@@ -6,6 +6,7 @@
 
 // @TODO@ Handle world chunk edges.
 
+
 constexpr f32 PIXELS_PER_METER = 50.0f;
 constexpr f32 METERS_PER_CHUNK = 16.0f;
 constexpr f32 GRAVITY          = -9.80665f;
@@ -484,10 +485,10 @@ procedure Chunk* get_chunk(State* state, vi2 coords)
 
 procedure void process_move(EntityPtr entity, State* state, f32 delta_time)
 {
-	Chunk** chunk   = {};
-	vf3*    rel_pos = {};
-	vf3*    vel     = {};
-	Shape*  shape   = {};
+	Chunk** chunk   = 0;
+	vf3*    rel_pos = 0;
+	vf3*    vel     = 0;
+	Shape*  shape   = 0;
 
 	switch (entity.type)
 	{
