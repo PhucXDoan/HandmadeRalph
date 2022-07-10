@@ -594,7 +594,7 @@ procedure constexpr bool32 operator+ (const String& str                 ) { retu
 procedure constexpr bool32 operator==(const String& a  , const String& b) { return a.size == b.size && memcmp(a.data, b.data, static_cast<size_t>(a.size)) == 0; }
 procedure constexpr bool32 operator!=(const String& a  , const String& b) { return !(a == b); }
 
-procedure constexpr String trunc(const String& str, const u64& maximum_length)
+procedure constexpr String ltrunc(const String& str, const u64& maximum_length)
 {
 	return { .size = min(str.size, maximum_length), .data = str.data };
 }
@@ -604,7 +604,7 @@ procedure constexpr String rtrunc(const String& str, const u64& maximum_length)
 	return { .size = min(str.size, maximum_length), .data = str.data + str.size - min(str.size, maximum_length) };
 }
 
-procedure constexpr String trim(const String& str, const u64& offset)
+procedure constexpr String ltrim(const String& str, const u64& offset)
 {
 	return { str.size - min(offset, str.size), str.data + min(offset, str.size) };
 }
@@ -614,9 +614,43 @@ procedure constexpr String rtrim(const String& str, const u64& offset)
 	return { str.size - min(offset, str.size), str.data };
 }
 
+procedure constexpr String trim(const String& str, const u64& loffset, const u64& roffset)
+{
+	return ltrim(rtrim(str, loffset), roffset);
+}
+
 procedure constexpr bool32 starts_with(const String& str, const String& prefix)
 {
-	return trunc(str, prefix.size) == prefix;
+	return ltrunc(str, prefix.size) == prefix;
+}
+
+procedure constexpr String ltrim_whitespace(const String& str)
+{
+	FOR_STR(str)
+	{
+		if (!is_whitespace(*it))
+		{
+			return { str.size - it_index, str.data + it_index };
+		}
+	}
+	return { 0, str.data + str.size };
+}
+
+procedure constexpr String rtrim_whitespace(const String& str)
+{
+	FOR_STR_REV(str)
+	{
+		if (!is_whitespace(*it))
+		{
+			return { it_index + 1, str.data };
+		}
+	}
+	return { 0, str.data };
+}
+
+procedure constexpr String trim_whitespace(const String& str)
+{
+	return ltrim_whitespace(rtrim_whitespace(str));
 }
 
 #pragma warning(pop)

@@ -114,60 +114,7 @@ struct EntityPressurePlate // @META@ Entity pressure_plate
 	bool32 down;
 };
 
-//#include "META/variant/Entity.h"
-
-enum struct EntityType : u8
-{
-	null,
-	tree,
-	hero,
-	pet,
-	monstar,
-	rock,
-	pressure_plate
-};
-
-struct Entity
-{
-	EntityType type;
-	union
-	{
-		EntityTree          tree;
-		EntityHero          hero;
-		EntityPet           pet;
-		EntityMonstar       monstar;
-		EntityRock          rock;
-		EntityPressurePlate pressure_plate;
-	};
-};
-
-struct EntityPtr
-{
-	EntityType type;
-	union
-	{
-		EntityTree*          tree;
-		EntityHero*          hero;
-		EntityPet*           pet;
-		EntityMonstar*       monstar;
-		EntityRock*          rock;
-		EntityPressurePlate* pressure_plate;
-	};
-};
-
-procedure Entity    widen(const EntityTree&          x) { return { EntityType::tree          , { .tree           = x } }; }
-procedure Entity    widen(const EntityHero&          x) { return { EntityType::hero          , { .hero           = x } }; }
-procedure Entity    widen(const EntityPet&           x) { return { EntityType::pet           , { .pet            = x } }; }
-procedure Entity    widen(const EntityMonstar&       x) { return { EntityType::monstar       , { .monstar        = x } }; }
-procedure Entity    widen(const EntityRock&          x) { return { EntityType::rock          , { .rock           = x } }; }
-procedure Entity    widen(const EntityPressurePlate& x) { return { EntityType::pressure_plate, { .pressure_plate = x } }; }
-
-procedure EntityPtr widen(EntityTree*          x) { return { EntityType::tree          , { .tree           = x } }; }
-procedure EntityPtr widen(EntityHero*          x) { return { EntityType::hero          , { .hero           = x } }; }
-procedure EntityPtr widen(EntityPet*           x) { return { EntityType::pet           , { .pet            = x } }; }
-procedure EntityPtr widen(EntityMonstar*       x) { return { EntityType::monstar       , { .monstar        = x } }; }
-procedure EntityPtr widen(EntityRock*          x) { return { EntityType::rock          , { .rock           = x } }; }
-procedure EntityPtr widen(EntityPressurePlate* x) { return { EntityType::pressure_plate, { .pressure_plate = x } }; }
+#include "META/variant/Entity.h"
 
 struct Chunk
 {

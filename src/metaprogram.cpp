@@ -395,18 +395,9 @@ procedure Tokenizer init_tokenizer(String file_path, MemoryArena* arena)
 
 			if (starts_with(comment, String("@META@")))
 			{
-				token.type = TokenType::meta;
-
-				while (token.text.size && is_whitespace(token.text.data[token.text.size - 1]))
-				{
-					token.text.size -= 1;
-				}
-
-				token.meta.info = trim(comment, String("@META@").size);
-				while (token.meta.info.size && is_whitespace(token.meta.info.data[0]))
-				{
-					token.meta.info = trim(token.meta.info, 1);
-				}
+				token.type      = TokenType::meta;
+				token.text      = rtrim_whitespace(token.text);
+				token.meta.info = trim_whitespace(ltrim(comment, String("@META@").size));
 			}
 		}
 		else if (peek_read(0) == '#')
@@ -427,11 +418,7 @@ procedure Tokenizer init_tokenizer(String file_path, MemoryArena* arena)
 				}
 				inc(1);
 			}
-
-			while (token.text.size && is_whitespace(token.text.data[token.text.size - 1]))
-			{
-				token.text.size -= 1;
-			}
+			token.text = rtrim_whitespace(token.text);
 		}
 		else if (is_alpha(peek_read(0)) || peek_read(0) == '_')
 		{
@@ -991,42 +978,41 @@ int main()
 			String file_path = main_token.text;
 			ASSERT(file_path.size && file_path.data[0] == '#');
 
-			do
-			{
-				file_path = trim(file_path, 1);
-			}
-			while (file_path.size && is_whitespace(file_path.data[0]));
+			file_path = ltrim_whitespace(ltrim(file_path, 1));
 
 			if (!starts_with(file_path, String("include")))
 			{
 				continue;
 			}
 
-			file_path = trim(file_path, String("include").size);
-
-			while (file_path.size && is_whitespace(file_path.data[0]))
-			{
-				file_path = trim(file_path, 1);
-			}
-
-			file_path = rtrim(trim(file_path, 1), 1);
+			file_path = trim(ltrim_whitespace(ltrim(file_path, String("include").size)), 1, 1);
 
 			if (!starts_with(file_path, String("META/")))
 			{
 				continue;
 			}
 
-			String meta_operation = trim(file_path, String("META/").size);
+			String meta_operation = ltrim(file_path, String("META/").size);
 			String file_name      = meta_operation;
 			FOR_STR(meta_operation)
 			{
 				if (*it == '/')
 				{
 					meta_operation.size = it_index;
-					file_name           = trim(file_name, it_index + 1);
+					file_name           = ltrim(file_name, it_index + 1);
 					break;
 				}
 			}
+			FOR_STR(file_name)
+			{
+				if (*it == '.')
+				{
+					file_name.size = it_index;
+					break;
+				}
+			}
+
+			deferred_arena_reset(&main_arena);
 
 			if (meta_operation == String("enum"))
 			{
@@ -1058,7 +1044,6 @@ int main()
 					}
 				}
 
-				deferred_arena_reset(&main_arena);
 				AST* ast = init_ast(&meta_tokenizer, &main_arena);
 				if (!ast)
 				{
@@ -1182,7 +1167,6 @@ int main()
 					}
 				}
 
-				deferred_arena_reset(&main_arena);
 				AST* ast = init_ast(&meta_tokenizer, &main_arena);
 				if (!ast)
 				{
@@ -1200,21 +1184,11 @@ int main()
 					return 1;
 				}
 
-				String meta_name = file_name;
-				FOR_STR(file_name)
-				{
-					if (*it == '.')
-					{
-						meta_name.size = it_index;
-						break;
-					}
-				}
-
 				StringBuilder* meta_builder  = init_string_builder(&main_arena);
 				StringBuilder* defer_builder = init_string_builder(&main_arena);
 
 				append(meta_builder, String("global inline constexpr String META_"));
-				append(meta_builder, meta_name);
+				append(meta_builder, file_name);
 				append(meta_builder, String("[] =\n\t{\n"));
 
 				FOR_NODES(declaration, ast->type_container.declarations->ast->declaration.underlying_type->type_container.declarations)
@@ -1228,46 +1202,30 @@ int main()
 					append(meta_builder, String("\t\t"));
 
 					i32    asset_path_count = 0;
-					String remaining        = declaration->ast->meta;
-					while (remaining.size)
+					for (String remaining = ltrim_whitespace(declaration->ast->meta); remaining.size; remaining = ltrim_whitespace(remaining))
 					{
-						if (is_whitespace(remaining.data[0]))
+						asset_path_count += 1;
+
+						String asset_path = remaining;
+						FOR_STR(asset_path)
 						{
-							remaining = trim(remaining, 1);
+							if (*it == ',')
+							{
+								asset_path.size = it_index;
+								break;
+							}
 						}
-						else
+
+						remaining  = ltrim_whitespace(ltrim(remaining, asset_path.size + 1));
+						asset_path = rtrim_whitespace(asset_path);
+
+						append(meta_builder, String("String(DATA_DIR \""));
+						append(meta_builder, asset_path);
+						append(meta_builder, String("\")"));
+
+						if (remaining.size || declaration->next)
 						{
-							asset_path_count += 1;
-
-							String asset_path = remaining;
-							FOR_STR(asset_path)
-							{
-								if (*it == ',')
-								{
-									asset_path.size = it_index;
-									break;
-								}
-							}
-
-							remaining = trim(remaining, asset_path.size + 1);
-
-							while (asset_path.size && is_whitespace(asset_path.data[asset_path.size - 1]))
-							{
-								asset_path.size -= 1;
-							}
-
-							append(meta_builder, String("String(DATA_DIR \""));
-							append(meta_builder, asset_path);
-							append(meta_builder, String("\")"));
-
-							while (remaining.size && is_whitespace(remaining.data[0]))
-							{
-								remaining = trim(remaining, 1);
-							}
-							if (remaining.size || declaration->next)
-							{
-								append(meta_builder, String(", "));
-							}
+							append(meta_builder, String(", "));
 						}
 					}
 					append(meta_builder , String("\n"));
@@ -1290,6 +1248,115 @@ int main()
 
 				append(meta_builder, String("\t};\n"));
 				append(meta_builder, defer_builder);
+
+				String meta_data = flush(meta_builder);
+				append(meta_builder, String(SRC_DIR));
+				append(meta_builder, file_path);
+				write(flush(meta_builder), meta_data);
+			}
+			else if (meta_operation == String("variant"))
+			{
+				struct NamePairNode
+				{
+					NamePairNode* next;
+					String        semantic;
+					String        container;
+				};
+
+				Tokenizer      meta_tokenizer = main_tokenizer;
+				StringBuilder* meta_builder   = init_string_builder(&main_arena);
+				NamePairNode*  name_pairs     = 0;
+				Token          meta_token     = shift(&meta_tokenizer, -1);
+				for (; meta_token.type != TokenType::null && meta_token.text.data != main_token.text.data; meta_token = shift(&meta_tokenizer, -1))
+				{
+					if (meta_token.type == TokenType::meta && starts_with(meta_token.meta.info, file_name))
+					{
+						String semantic_name = ltrim(meta_token.meta.info, file_name.size);
+						if (semantic_name.size == 0 || !is_whitespace(semantic_name.data[0]))
+						{
+							continue;
+						}
+						semantic_name = trim_whitespace(semantic_name);
+						FOR_STR(semantic_name)
+						{
+							if (*it != '_' && !is_alpha(*it) && IMPLIES(is_digit(*it), it_index == 0))
+							{
+								report(String("Invalid identifier."), &meta_tokenizer);
+								report(String("Failed to do meta operation."), &main_tokenizer);
+								return 1;
+							}
+						}
+
+						meta_token = shift(&meta_tokenizer, -1);
+						if (meta_token.type != TokenType::identifier)
+						{
+							report(String("Expected identifier."), &meta_tokenizer);
+							report(String("Failed to do meta operation."), &main_tokenizer);
+							return 1;
+						}
+
+						String container_name = meta_token.text;
+
+						meta_token = shift(&meta_tokenizer, -1);
+						if (!is_reserved(meta_token, ReservedType::a_struct))
+						{
+							report(String("Expected `struct`."), &meta_tokenizer);
+							report(String("Failed to do meta operation."), &main_tokenizer);
+							return 1;
+						}
+
+						NamePairNode* node = allocate<NamePairNode>(&main_arena);
+						*node =
+							{
+								.next      = name_pairs,
+								.semantic  = semantic_name,
+								.container = container_name
+							};
+						name_pairs = node;
+					}
+				}
+
+				append(meta_builder, String("enum struct "));
+				append(meta_builder, file_name);
+				append(meta_builder, String("Type : u8\n{\n\tnull"));
+				FOR_NODES(name_pairs)
+				{
+					append(meta_builder, String(",\n\t"));
+					append(meta_builder, it->semantic);
+				}
+				append(meta_builder, String("\n};\n\nstruct "));
+				append(meta_builder, file_name);
+				append(meta_builder, String("\n{\n\t"));
+				append(meta_builder, file_name);
+				append(meta_builder, String("Type type;\n\tunion\n\t{\n"));
+				FOR_NODES(name_pairs)
+				{
+					append(meta_builder, String("\t\t"));
+					append(meta_builder, it->container);
+					append(meta_builder, String(" "));
+					append(meta_builder, it->semantic);
+					append(meta_builder, String(";\n"));
+				}
+				append(meta_builder, String("\t};\n};\n\nstruct "));
+				append(meta_builder, file_name);
+				append(meta_builder, String("Ptr\n{\n\t"));
+				append(meta_builder, file_name);
+				append(meta_builder, String("Type type;\n\tunion\n\t{\n"));
+				FOR_NODES(name_pairs)
+				{
+					append(meta_builder, String("\t\t"));
+					append(meta_builder, it->container);
+					append(meta_builder, String("* "));
+					append(meta_builder, it->semantic);
+					append(meta_builder, String(";\n"));
+				}
+				append(meta_builder, String("\t};\n};\n\n"));
+
+				FOR_NODES(name_pairs)
+				{
+					appendf(meta_builder, "procedure %.*s    widen(const %.*s& x) { return { %.*sType::%.*s, { .%.*s = x } }; }\n", PASS_ISTR(file_name), PASS_ISTR(it->container), PASS_ISTR(file_name), PASS_ISTR(it->semantic), PASS_ISTR(it->semantic));
+					appendf(meta_builder, "procedure %.*sPtr widen(      %.*s* x) { return { %.*sType::%.*s, { .%.*s = x } }; }\n", PASS_ISTR(file_name), PASS_ISTR(it->container), PASS_ISTR(file_name), PASS_ISTR(it->semantic), PASS_ISTR(it->semantic));
+				}
 
 				String meta_data = flush(meta_builder);
 				append(meta_builder, String(SRC_DIR));

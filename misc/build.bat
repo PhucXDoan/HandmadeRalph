@@ -12,8 +12,8 @@ IF not exist W:\build\ (
 )
 
 pushd W:\build\
-	IF exist W:\src\meta\ (
-		del W:\src\meta\ /S /Q >nul
+	IF exist W:\src\META\ (
+		del W:\src\META\ /S /Q >nul
 	)
 
 	cl W:\src\metaprogram.cpp %DEBUG_COMPILER_FLAGS% /WX /link %DEBUG_LINKER_FLAGS% shell32.lib
