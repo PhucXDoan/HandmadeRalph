@@ -484,7 +484,7 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int cmd_show)
 		#if DEBUG
 		reinterpret_cast<byte*>(VirtualAlloc(reinterpret_cast<void*>(TEBIBYTES_OF(8)), PLATFORM_MEMORY_SIZE, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE));
 		#else
-		reinterpret_cast<byte*>(VirtualAlloc(0, PLATFORM_MEMORY_SIZE, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE));
+		reinterpret_cast<byte*>(VirtualAlloc({}, PLATFORM_MEMORY_SIZE, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE));
 		#endif
 
 	ASSERT(backbuffer_bitmap_data);
@@ -911,14 +911,14 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int cmd_show)
 									PlatformSample* curr_sample = platform_sample_buffer;
 
 									ASSERT(region_size_0 % sizeof(PlatformSample) == 0);
-									FOR_ELEMS(sample, reinterpret_cast<u32*>(region_0), static_cast<i32>(region_size_0 / sizeof(PlatformSample)))
+									FOR_ELEMS(sample, reinterpret_cast<u32*>(region_0), region_size_0 / sizeof(PlatformSample))
 									{
 										*sample      = curr_sample->sample;
 										curr_sample += 1;
 									}
 
 									ASSERT(region_size_1 % sizeof(PlatformSample) == 0);
-									FOR_ELEMS(sample, reinterpret_cast<u32*>(region_1), static_cast<i32>(region_size_1 / sizeof(PlatformSample)))
+									FOR_ELEMS(sample, reinterpret_cast<u32*>(region_1), region_size_1 / sizeof(PlatformSample))
 									{
 										*sample      = curr_sample->sample;
 										curr_sample += 1;

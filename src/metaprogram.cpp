@@ -27,7 +27,7 @@ procedure bool32 write(String file_path, String content)
 	}
 
 	wchar_t dir_path_buffer[256] = {};
-	FOR_ELEMS_REV(scan_c, wide_file_path, static_cast<i32>(file_path.size))
+	FOR_ELEMS_REV(scan_c, wide_file_path, file_path.size)
 	{
 		if (*scan_c == L'/' || *scan_c == L'\\')
 		{
@@ -111,9 +111,16 @@ procedure void append(StringBuilder* builder, String str)
 
 procedure void append(StringBuilder* builder, StringBuilder* post)
 {
-	for (StringBuilderCharBufferNode* it = &post->head; it && it->count; it = it->next)
+	FOR_NODES(&post->head)
 	{
-		append(builder, { it->count, it->buffer });
+		if (it->count)
+		{
+			append(builder, { it->count, it->buffer });
+		}
+		else
+		{
+			break;
+		}
 	}
 }
 
@@ -355,7 +362,7 @@ procedure Tokenizer init_tokenizer(String file_path, MemoryArena* arena)
 			[&](u64 offset)
 			{
 				offset = min(offset, static_cast<u64>(tokenizer.file_data + tokenizer.file_size - curr_read));
-				FOR_RANGE(static_cast<i32>(offset))
+				FOR_RANGE(offset)
 				{
 					if (curr_read[0] == '\n')
 					{
@@ -624,7 +631,7 @@ procedure void report(String message, Tokenizer* tokenizer)
 
 	ASSERT(reported_token.text.data >= line.data);
 	printf("::  %*s", static_cast<i32>(reported_token.text.data - line.data), "");
-	FOR_RANGE(static_cast<i32>(reported_token.text.size))
+	FOR_RANGE(reported_token.text.size)
 	{
 		printf("~");
 	}
@@ -1013,7 +1020,7 @@ int main()
 				}
 			}
 
-			deferred_arena_reset(&main_arena);
+			DEFER_ARENA_RESET(&main_arena);
 
 			if (meta_operation == String("enum"))
 			{
@@ -1118,7 +1125,12 @@ int main()
 				String meta_data = flush(meta_builder);
 				append(meta_builder, String(SRC_DIR));
 				append(meta_builder, file_path);
-				write(flush(meta_builder), meta_data);
+
+				if (!write(flush(meta_builder), meta_data))
+				{
+					report(String("Failed to write meta data to file."), &main_tokenizer);
+					return 1;
+				}
 			}
 			else if (meta_operation == String("asset"))
 			{
@@ -1253,7 +1265,12 @@ int main()
 				String meta_data = flush(meta_builder);
 				append(meta_builder, String(SRC_DIR));
 				append(meta_builder, file_path);
-				write(flush(meta_builder), meta_data);
+
+				if (!write(flush(meta_builder), meta_data))
+				{
+					report(String("Failed to write meta data to file."), &main_tokenizer);
+					return 1;
+				}
 			}
 			else if (meta_operation == String("variant"))
 			{
@@ -1367,7 +1384,12 @@ int main()
 				String meta_data = flush(meta_builder);
 				append(meta_builder, String(SRC_DIR));
 				append(meta_builder, file_path);
-				write(flush(meta_builder), meta_data);
+
+				if (!write(flush(meta_builder), meta_data))
+				{
+					report(String("Failed to write meta data to file."), &main_tokenizer);
+					return 1;
+				}
 			}
 			else
 			{
@@ -1376,5 +1398,6 @@ int main()
 			}
 		}
 	}
+
 	return 0;
 }

@@ -1,7 +1,7 @@
 @echo off
 setlocal EnableDelayedExpansion
 set COMMON_COMPILER_FLAGS=^
-	-std=c++20 -Xlinker /incremental:no -pedantic -Weverything -ferror-limit=8^
+	-std=c++20 -Xlinker /incremental:no -pedantic -Weverything -ferror-limit=1 -Xlinker /debug^
 	-DDATA_DIR="\"W:/data/\""^
 	-DEXE_DIR="\"W:/build/\""^
 	-DSRC_DIR="\"W:/src/\""^
@@ -23,38 +23,38 @@ pushd W:\build\
 	)
 
 	del *.pdb >nul 2> nul
-	echo Metaprogam compiling...
-	clang -o metaprogram.exe %DEBUG_COMPILER_FLAGS% W:\src\metaprogram.cpp -l shell32.lib
+	echo :: metaprogam.cpp
+	clang -o metaprogram.exe %DEBUG_COMPILER_FLAGS% -Werror W:\src\metaprogram.cpp -l shell32.lib
 	if %ERRORLEVEL% neq 0 (
-		echo Metaprogram compilation failed
+		echo :: Metaprogram compilation failed
 		goto ABORT
 	)
 
-	echo Metaprogram executing...
+	echo :: metaprogram.exe
 	metaprogram.exe
 	if %ERRORLEVEL% neq 0 (
-		echo Metaprogram execution failed
+		echo :: Metaprogram execution failed
 		goto ABORT
 	)
 
-	echo HandmadeRalph compiling...
+	echo :: HandmadeRalph.cpp
 	echo > LOCK.temp
 	clang -o HandmadeRalph.dll %DEBUG_COMPILER_FLAGS% W:\src\HandmadeRalph.cpp -shared -Xlinker /PDB:HandmadeRalph_%RANDOM%.pdb -Xlinker /export:PlatformUpdate -Xlinker /export:PlatformSound
+	del LOCK.temp
 	if %ERRORLEVEL% neq 0 (
-		echo HandmadeRalph compilation failed
+		echo :: HandmadeRalph compilation failed
 		goto ABORT
 	)
-	del LOCK.temp
 
 	copy nul HandmadeRalph.exe >nul 2>&1
 	if %ERRORLEVEL% neq 0 (
 		goto ABORT
 	)
 
-	echo HandmadeRalph_win32 compiling...
+	echo :: HandmadeRalph_win32.cpp
 	clang -o HandmadeRalph.exe %DEBUG_COMPILER_FLAGS% W:\src\HandmadeRalph_win32.cpp -l user32.lib -l gdi32.lib -l winmm.lib -l dxgi.lib -Xlinker /subsystem:windows
 	if %ERRORLEVEL% neq 0 (
-		echo HandmadeRalph_win32 compilation failed
+		echo :: HandmadeRalph_win32 compilation failed
 		goto ABORT
 	)
 
@@ -74,5 +74,5 @@ pushd W:\build\
 	set /a endtime = %h% * 360000 + %m% * 6000 + 100 * %s% + %c%
 	set /a runtime = %endtime% - %starttime%
 	set runtime = %s%.%c%
-	echo Build time : %runtime%0ms
+	echo :: %runtime%0ms
 popd W:\build\

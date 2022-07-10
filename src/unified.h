@@ -3,7 +3,6 @@
 #pragma clang diagnostic ignored "-Wunused-function"
 #pragma clang diagnostic ignored "-Wunused-template"
 
-
 #include <stdint.h>
 typedef uint8_t        byte;
 typedef const char*    strlit;
@@ -36,51 +35,39 @@ typedef double         f64;
 #define MACRO_OVERLOADED_2_(_0, _1, MACRO, ...)         MACRO
 #define MACRO_OVERLOADED_3_(_0, _1, _2, MACRO, ...)     MACRO
 #define MACRO_OVERLOADED_4_(_0, _1, _2, _3, MACRO, ...) MACRO
-#define MACRO_HEAD_ARGS_(X, ...)                        (X)
-#define MACRO_TAIL_ARGS_(X, ...)                        (__VA_ARGS__)
-#define MACRO_FOR_EACH_0_(MACRO,    ...)
-#define MACRO_FOR_EACH_1_(MACRO, x     )                MACRO(x)
-#define MACRO_FOR_EACH_2_(MACRO, x, ...)                MACRO(x) MACRO_FOR_EACH_1_(MACRO, __VA_ARGS__)
-#define MACRO_FOR_EACH_3_(MACRO, x, ...)                MACRO(x) MACRO_EXPAND_(MACRO_FOR_EACH_2_(MACRO, __VA_ARGS__))
-#define MACRO_FOR_EACH_4_(MACRO, x, ...)                MACRO(x) MACRO_EXPAND_(MACRO_FOR_EACH_3_(MACRO, __VA_ARGS__))
-#define MACRO_FOR_EACH_(MACRO, ...)                     MACRO_EXPAND_(MACRO_OVERLOADED_4_(__VA_ARGS__, MACRO_FOR_EACH_4_, MACRO_FOR_EACH_3_, MACRO_FOR_EACH_2_, MACRO_FOR_EACH_1_, MACRO_FOR_EACH_0_)(MACRO, __VA_ARGS__))
-#define MACRO_STRINGIFYCOMMA_(X)                        MACRO_STRINGIFY(X),
-#define MACRO_STRINGIFYARGS_(...)                       MACRO_FOR_EACH_(MACRO_STRINGIFYCOMMA_, __VA_ARGS__)
 
 #define ARRAY_CAPACITY(XS)                  (sizeof(XS) / sizeof((XS)[0]))
 
-#define FOR_INTERVAL_(NAME, MINI, MAXI)     for (auto NAME = (MINI); NAME < (MAXI); NAME += 1)
-#define FOR_INDICIES_(NAME, MAXI)           FOR_INTERVAL_(NAME, 0, (MAXI))
-#define FOR_REPEAT_(MAXI)                   FOR_INTERVAL_(MACRO_CONCAT(FOR_REPEAT_, __LINE__), 0, (MAXI))
-#define FOR_RANGE(...)                      MACRO_EXPAND_(MACRO_OVERLOADED_3_(__VA_ARGS__, FOR_INTERVAL_, FOR_INDICIES_, FOR_REPEAT_)(__VA_ARGS__))
-#define FOR_INTERVAL_REV_(NAME, MINI, MAXI) for (i64 NAME = (MAXI) - 1; NAME >= (MINI); NAME -= 1)
-#define FOR_INDICIES_REV_(NAME, MAXI)       FOR_INTERVAL_REV_(NAME, 0, (MAXI))
-#define FOR_RANGE_REV(...)                  MACRO_EXPAND_(MACRO_OVERLOADED_3_(__VA_ARGS__, FOR_INTERVAL_REV_, FOR_INDICIES_REV_)(__VA_ARGS__))
+#define FOR_RANGE_3_(NAME, MINI, MAXI)      for (std::remove_const<std::remove_reference<decltype(MAXI)>::type>::type NAME = (MINI); NAME < (MAXI); NAME += 1)
+#define FOR_RANGE_2_(NAME, MAXI)            FOR_RANGE_3_(NAME, 0, (MAXI))
+#define FOR_RANGE_1_(MAXI)                  FOR_RANGE_2_(MACRO_CONCAT(FOR_RANGE, __LINE__), (MAXI))
+#define FOR_RANGE(...)                      MACRO_EXPAND_(MACRO_OVERLOADED_3_(__VA_ARGS__, FOR_RANGE_3_, FOR_RANGE_2_, FOR_RANGE_1_)(__VA_ARGS__))
 
-#define FOR_POINTER_(NAME, XS, COUNT)\
-for (i64 MACRO_CONCAT(NAME, _index) = 0; MACRO_CONCAT(NAME, _index) < static_cast<i64>(COUNT); MACRO_CONCAT(NAME, _index) += 1)\
-	if (const auto NAME = &(XS)[MACRO_CONCAT(NAME, _index)]; false); else
-#define FOR_ARRAY_(NAME, XS)                FOR_POINTER_(NAME, (XS), ARRAY_CAPACITY(XS))
-#define FOR_IT_(XS)                         FOR_POINTER_(it, (XS), ARRAY_CAPACITY(XS))
-#define FOR_ELEMS(...)                      MACRO_EXPAND_(MACRO_OVERLOADED_3_(__VA_ARGS__, FOR_POINTER_, FOR_ARRAY_, FOR_IT_)(__VA_ARGS__))
+#define FOR_RANGE_REV_3_(NAME, MINI, MAXI)  for (std::remove_const<std::remove_reference<decltype(MAXI)>::type>::type NAME = (MAXI); NAME-- > 0;)
+#define FOR_RANGE_REV_2_(NAME, MAXI)        FOR_RANGE_REV_3_(NAME, 0, (MAXI))
+#define FOR_RANGE_REV(...)                  MACRO_EXPAND_(MACRO_OVERLOADED_3_(__VA_ARGS__, FOR_RANGE_REV_3_, FOR_RANGE_REV_2_, FOR_RANGE_REV_1_)(__VA_ARGS__))
 
-#define FOR_POINTER_REV_(NAME, XS, COUNT)   for (i64 MACRO_CONCAT(NAME, _index) = static_cast<i64>(COUNT) - 1; MACRO_CONCAT(NAME, _index) >= 0; MACRO_CONCAT(NAME, _index) -= 1) if (const auto NAME = &(XS)[MACRO_CONCAT(NAME, _index)]; false); else
-#define FOR_ARRAY_REV_(NAME, XS)            FOR_POINTER_REV_(NAME, (XS), ARRAY_CAPACITY(XS))
-#define FOR_ELEMS_REV(...)                  MACRO_EXPAND_(MACRO_OVERLOADED_3_(__VA_ARGS__, FOR_POINTER_REV_, FOR_ARRAY_REV_)(__VA_ARGS__))
+#define FOR_ELEMS_3_(NAME, XS, COUNT)       FOR_RANGE(MACRO_CONCAT(NAME, _index), 0, (COUNT)) if (const auto NAME = &(XS)[MACRO_CONCAT(NAME, _index)]; false); else
+#define FOR_ELEMS_2_(NAME, XS)              FOR_ELEMS_3_(NAME, (XS), ARRAY_CAPACITY(XS))
+#define FOR_ELEMS_1_(XS)                    FOR_ELEMS_3_(it  , (XS), ARRAY_CAPACITY(XS))
+#define FOR_ELEMS(...)                      MACRO_EXPAND_(MACRO_OVERLOADED_3_(__VA_ARGS__, FOR_ELEMS_3_, FOR_ELEMS_2_, FOR_ELEMS_1_)(__VA_ARGS__))
 
-#define FOR_NODES_(NAME, NODES)\
-if (auto MACRO_CONCAT(NAME, __LINE__) = (NODES); false); else\
-	for (i32 MACRO_CONCAT(NAME, _index) = 0; (void) MACRO_CONCAT(NAME, _index), MACRO_CONCAT(NAME, __LINE__); MACRO_CONCAT(NAME, _index) += 1, MACRO_CONCAT(NAME, __LINE__) = MACRO_CONCAT(NAME, __LINE__)->next)\
-		if (const auto NAME = MACRO_CONCAT(NAME, __LINE__))
-#define FOR_IT_NODES_(NODES)                FOR_NODES_(it, (NODES))
-#define FOR_NODES(...)                      MACRO_EXPAND_(MACRO_OVERLOADED_2_(__VA_ARGS__, FOR_NODES_, FOR_IT_NODES_)(__VA_ARGS__))
+#define FOR_ELEMS_REV_3_(NAME, XS, COUNT)   FOR_RANGE_REV(MACRO_CONCAT(NAME, _index), 0, (COUNT)) if (const auto NAME = &(XS)[MACRO_CONCAT(NAME, _index)]; false); else
+#define FOR_ELEMS_REV_2_(NAME, XS)          FOR_ELEMS_REV_3_(NAME, (XS), ARRAY_CAPACITY(XS))
+#define FOR_ELEMS_REV_1_(XS)                FOR_ELEMS_REV_3_(it  , (XS), ARRAY_CAPACITY(XS))
+#define FOR_ELEMS_REV(...)                  MACRO_EXPAND_(MACRO_OVERLOADED_3_(__VA_ARGS__, FOR_ELEMS_REV_3_, FOR_ELEMS_REV_2_, FOR_ELEMS_REV_1_)(__VA_ARGS__))
 
-#define FOR_STRING_(NAME, STR)              for (u64 MACRO_CONCAT(NAME, _index) = 0; MACRO_CONCAT(NAME, _index) < (STR).size; MACRO_CONCAT(NAME, _index) += 1) if (const auto NAME = &(STR).data[MACRO_CONCAT(NAME, _index)]; false); else
-#define FOR_STR_(STR)                       FOR_STRING_(it, STR)
-#define FOR_STR(...)                        MACRO_EXPAND_(MACRO_OVERLOADED_2_(__VA_ARGS__, FOR_STRING_, FOR_STR_)(__VA_ARGS__))
-#define FOR_STRING_REV_(NAME, STR)          for (u64 MACRO_CONCAT(NAME, _index) = (STR).size; MACRO_CONCAT(NAME, _index)-- > 0;) if (const auto NAME = &(STR).data[MACRO_CONCAT(NAME, _index)]; false); else
-#define FOR_STR_REV_(STR)                   FOR_STRING_REV_(it, STR)
-#define FOR_STR_REV(...)                    MACRO_EXPAND_(MACRO_OVERLOADED_2_(__VA_ARGS__, FOR_STRING_REV_, FOR_STR_REV_)(__VA_ARGS__))
+#define FOR_NODES_2_(NAME, NODES)           if (auto MACRO_CONCAT(NAME, __LINE__) = (NODES); false); else for (i32 MACRO_CONCAT(NAME, _index) = 0; (void) MACRO_CONCAT(NAME, _index), MACRO_CONCAT(NAME, __LINE__); MACRO_CONCAT(NAME, _index) += 1, MACRO_CONCAT(NAME, __LINE__) = MACRO_CONCAT(NAME, __LINE__)->next) if (const auto NAME = MACRO_CONCAT(NAME, __LINE__))
+#define FOR_NODES_1_(NODES)                 FOR_NODES_2_(it, (NODES))
+#define FOR_NODES(...)                      MACRO_EXPAND_(MACRO_OVERLOADED_2_(__VA_ARGS__, FOR_NODES_2_, FOR_NODES_1_)(__VA_ARGS__))
+
+#define FOR_STR_2_(NAME, STR)               FOR_ELEMS(NAME, (STR).data, (STR).size)
+#define FOR_STR_1_(STR)                     FOR_ELEMS(it  , (STR).data, (STR).size)
+#define FOR_STR(...)                        MACRO_EXPAND_(MACRO_OVERLOADED_2_(__VA_ARGS__, FOR_STR_2_, FOR_STR_1_)(__VA_ARGS__))
+
+#define FOR_STR_REV_2_(NAME, STR)           FOR_ELEMS_REV(NAME, (STR).data, (STR).size)
+#define FOR_STR_REV_1_(STR)                 FOR_ELEMS_REV(it  , (STR).data, (STR).size)
+#define FOR_STR_REV(...)                    MACRO_EXPAND_(MACRO_OVERLOADED_2_(__VA_ARGS__, FOR_STR_REV_2_, FOR_STR_REV_1_)(__VA_ARGS__))
 
 #define IMPLIES(P, Q)                       (!(P) || (Q))
 #define IFF(P, Q)                           (!(P) == !(Q))
@@ -95,9 +82,7 @@ if (auto MACRO_CONCAT(NAME, __LINE__) = (NODES); false); else\
 	#pragma clang diagnostic push
 	#pragma clang diagnostic ignored "-Wglobal-constructors"
 
-	#include <stdio.h>
 	#include <Windows.h>
-	#include <signal.h>
 	#undef interface
 	#undef min
 	#undef max
@@ -130,7 +115,7 @@ if (auto MACRO_CONCAT(NAME, __LINE__) = (NODES); false); else\
 	for (DEBUG_persist bool32 MACRO_CONCAT(DEBUG_ONCE_, __LINE__) = true; MACRO_CONCAT(DEBUG_ONCE_, __LINE__); MACRO_CONCAT(DEBUG_ONCE_, __LINE__) = false)
 
 	global const i64 DEBUG_PERFORMANCE_COUNTER_FREQUENCY =
-		[](void)
+		[]()
 		{
 			LARGE_INTEGER n;
 			QueryPerformanceFrequency(&n);
@@ -197,6 +182,7 @@ if (auto MACRO_CONCAT(NAME, __LINE__) = (NODES); false); else\
 	#define DEBUG_PROFILER_start(...)
 	#define DEBUG_PROFILER_end(...)
 	#define DEBUG_STDOUT_HALT()
+	#define DEBUG_WIN32_ERR()
 #endif
 
 #define flag_struct(NAME, TYPE)\
@@ -238,7 +224,7 @@ procedure DEFER_<F> operator+(DEFER_EMPTY_, F&& f)
 // Memory.
 //
 
-#define deferred_arena_reset(ARENA) u64 MACRO_CONCAT(ARENA_CHECKPOINT_, __LINE__) = (ARENA)->used; DEFER { (ARENA)->used = MACRO_CONCAT(ARENA_CHECKPOINT_, __LINE__); }
+#define DEFER_ARENA_RESET(ARENA) u64 MACRO_CONCAT(DEFER_ARENA_RESET, __LINE__) = (ARENA)->used; DEFER { (ARENA)->used = MACRO_CONCAT(DEFER_ARENA_RESET, __LINE__); }
 
 struct MemoryArena
 {
@@ -264,11 +250,6 @@ procedure TYPE* allocate(MemoryArena* arena, const u64& count = 1)
 //
 // Math.
 //
-
-#include <algorithm>
-using std::min;
-using std::max;
-using std::clamp;
 
 #define PASS_V2(V) (V).x, (V).y
 #define PASS_V3(V) (V).x, (V).y, (V).z
@@ -504,6 +485,10 @@ procedure constexpr vf3    vx3(const f32& n) { return { n, n, n    }; }
 procedure constexpr vi3    vx3(const i32& n) { return { n, n, n    }; }
 procedure constexpr vf4    vx4(const f32& n) { return { n, n, n, n }; }
 procedure constexpr vi4    vx4(const i32& n) { return { n, n, n, n }; }
+
+template <typename TYPE> procedure constexpr TYPE min  (               const TYPE& a, const TYPE& b) { return a <= b ? a : b; }
+template <typename TYPE> procedure constexpr TYPE max  (               const TYPE& a, const TYPE& b) { return a >= b ? a : b; }
+template <typename TYPE> procedure constexpr TYPE clamp(const TYPE& x, const TYPE& a, const TYPE& b) { return x <= a ? a : x >= b ? b : x; }
 
 template <typename TYPE>
 procedure constexpr TYPE sign(const TYPE& x)
