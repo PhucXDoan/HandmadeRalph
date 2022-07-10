@@ -1,3 +1,6 @@
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wunused-function"
+
 global constexpr u32 RAND_TABLE[] =
 	{
 		0x78f3df, 0x6a00a2, 0x1ec2ae, 0x44dd1f, 0x161f97, 0x0f16c0, 0x0ff50f, 0x7906cb, 0x7ebeed, 0x010452, 0x5aa5ba, 0x4aaa9b, 0x25c486, 0x02dd08, 0x73cf94, 0x5edc3a, 0x27928e, 0x5306dc, 0x2afd0c, 0x0cf539, 0x344c5e, 0x1b4531, 0x76863a, 0x131ef1, 0x2ba98d, 0x5adde5, 0x102953, 0x7850cb, 0x525b39, 0x304b30, 0x77537b, 0x6c38db,
@@ -53,28 +56,27 @@ global constexpr f32 RAND_TABLE_NORMALIZER =
 				n = *it;
 			}
 		}
-		if (n < (1ULL << 23))
-		{
-			return n + 1.0f;
-		}
+		return static_cast<f32>(n) + 1.0f;
 	}();
 
 procedure f32 rng(const u32& seed)
 {
-	return RAND_TABLE[seed % ARRAY_CAPACITY(RAND_TABLE)] / RAND_TABLE_NORMALIZER;
+	return static_cast<f32>(RAND_TABLE[seed % ARRAY_CAPACITY(RAND_TABLE)]) / RAND_TABLE_NORMALIZER;
 }
 
 procedure f32 rng(u32* seed)
 {
-	return RAND_TABLE[++*seed % ARRAY_CAPACITY(RAND_TABLE)] / RAND_TABLE_NORMALIZER;
+	return static_cast<f32>(RAND_TABLE[++*seed % ARRAY_CAPACITY(RAND_TABLE)]) / RAND_TABLE_NORMALIZER;
 }
 
 procedure i32 rng(u32* seed, const i32& start, const i32& end)
 {
-	return static_cast<i32>(rng(seed) * (end - start) + start);
+	return static_cast<i32>(rng(seed) * static_cast<f32>(end - start) + static_cast<f32>(start));
 }
 
 procedure f32 rng(u32* seed, const f32& start, const f32& end)
 {
 	return rng(seed) * (end - start) + start;
 }
+
+#pragma clang diagnostic pop

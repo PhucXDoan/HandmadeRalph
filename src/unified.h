@@ -1,6 +1,8 @@
 #pragma once
-#pragma warning(push)
-#pragma warning(disable : 4514 4505)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wunused-function"
+#pragma clang diagnostic ignored "-Wunused-template"
+
 
 #include <stdint.h>
 typedef uint8_t        byte;
@@ -47,23 +49,29 @@ typedef double         f64;
 
 #define ARRAY_CAPACITY(XS)                  (sizeof(XS) / sizeof((XS)[0]))
 
-#define FOR_INTERVAL_(NAME, MINI, MAXI)     for (i32 NAME = (MINI); NAME < (MAXI); NAME += 1)
+#define FOR_INTERVAL_(NAME, MINI, MAXI)     for (auto NAME = (MINI); NAME < (MAXI); NAME += 1)
 #define FOR_INDICIES_(NAME, MAXI)           FOR_INTERVAL_(NAME, 0, (MAXI))
 #define FOR_REPEAT_(MAXI)                   FOR_INTERVAL_(MACRO_CONCAT(FOR_REPEAT_, __LINE__), 0, (MAXI))
 #define FOR_RANGE(...)                      MACRO_EXPAND_(MACRO_OVERLOADED_3_(__VA_ARGS__, FOR_INTERVAL_, FOR_INDICIES_, FOR_REPEAT_)(__VA_ARGS__))
-#define FOR_INTERVAL_REV_(NAME, MINI, MAXI) for (i32 NAME = (MAXI) - 1; NAME >= (MINI); NAME -= 1)
+#define FOR_INTERVAL_REV_(NAME, MINI, MAXI) for (i64 NAME = (MAXI) - 1; NAME >= (MINI); NAME -= 1)
 #define FOR_INDICIES_REV_(NAME, MAXI)       FOR_INTERVAL_REV_(NAME, 0, (MAXI))
 #define FOR_RANGE_REV(...)                  MACRO_EXPAND_(MACRO_OVERLOADED_3_(__VA_ARGS__, FOR_INTERVAL_REV_, FOR_INDICIES_REV_)(__VA_ARGS__))
 
-#define FOR_POINTER_(NAME, XS, COUNT)       for (i32 MACRO_CONCAT(NAME, _index) = 0; MACRO_CONCAT(NAME, _index) < (COUNT); MACRO_CONCAT(NAME, _index) += 1) if (const auto NAME = &(XS)[MACRO_CONCAT(NAME, _index)]; false); else
+#define FOR_POINTER_(NAME, XS, COUNT)\
+for (i64 MACRO_CONCAT(NAME, _index) = 0; MACRO_CONCAT(NAME, _index) < static_cast<i64>(COUNT); MACRO_CONCAT(NAME, _index) += 1)\
+	if (const auto NAME = &(XS)[MACRO_CONCAT(NAME, _index)]; false); else
 #define FOR_ARRAY_(NAME, XS)                FOR_POINTER_(NAME, (XS), ARRAY_CAPACITY(XS))
 #define FOR_IT_(XS)                         FOR_POINTER_(it, (XS), ARRAY_CAPACITY(XS))
 #define FOR_ELEMS(...)                      MACRO_EXPAND_(MACRO_OVERLOADED_3_(__VA_ARGS__, FOR_POINTER_, FOR_ARRAY_, FOR_IT_)(__VA_ARGS__))
-#define FOR_POINTER_REV_(NAME, XS, COUNT)   for (i32 MACRO_CONCAT(NAME, _index) = (COUNT) - 1; MACRO_CONCAT(NAME, _index) >= 0; MACRO_CONCAT(NAME, _index) -= 1) if (const auto NAME = &(XS)[MACRO_CONCAT(NAME, _index)]; false); else
+
+#define FOR_POINTER_REV_(NAME, XS, COUNT)   for (i64 MACRO_CONCAT(NAME, _index) = static_cast<i64>(COUNT) - 1; MACRO_CONCAT(NAME, _index) >= 0; MACRO_CONCAT(NAME, _index) -= 1) if (const auto NAME = &(XS)[MACRO_CONCAT(NAME, _index)]; false); else
 #define FOR_ARRAY_REV_(NAME, XS)            FOR_POINTER_REV_(NAME, (XS), ARRAY_CAPACITY(XS))
 #define FOR_ELEMS_REV(...)                  MACRO_EXPAND_(MACRO_OVERLOADED_3_(__VA_ARGS__, FOR_POINTER_REV_, FOR_ARRAY_REV_)(__VA_ARGS__))
 
-#define FOR_NODES_(NAME, NODES)             if (auto NAME = (NODES); false); else for (i32 MACRO_CONCAT(NAME, _index) = 0; NAME; MACRO_CONCAT(NAME, _index) += 1, NAME = NAME->next)
+#define FOR_NODES_(NAME, NODES)\
+if (auto MACRO_CONCAT(NAME, __LINE__) = (NODES); false); else\
+	for (i32 MACRO_CONCAT(NAME, _index) = 0; (void) MACRO_CONCAT(NAME, _index), MACRO_CONCAT(NAME, __LINE__); MACRO_CONCAT(NAME, _index) += 1, MACRO_CONCAT(NAME, __LINE__) = MACRO_CONCAT(NAME, __LINE__)->next)\
+		if (const auto NAME = MACRO_CONCAT(NAME, __LINE__))
 #define FOR_IT_NODES_(NODES)                FOR_NODES_(it, (NODES))
 #define FOR_NODES(...)                      MACRO_EXPAND_(MACRO_OVERLOADED_2_(__VA_ARGS__, FOR_NODES_, FOR_IT_NODES_)(__VA_ARGS__))
 
@@ -78,17 +86,18 @@ typedef double         f64;
 #define IFF(P, Q)                           (!(P) == !(Q))
 #define IN_RANGE(X, MINI, MAXI)             ((MINI) <= (X) && (X) < (MAXI))
 #define SWAP(X, Y)                          do { auto MACRO_CONCAT(SWAP_, __LINE__) = *(X); *(X) = *(Y); *(Y) = MACRO_CONCAT(SWAP_, __LINE__); } while (false)
-#define KIBIBYTES_OF(N)                     (1024ULL *             (N))
-#define MEBIBYTES_OF(N)                     (1024ULL * KIBIBYTES_OF(N))
-#define GIBIBYTES_OF(N)                     (1024ULL * MEBIBYTES_OF(N))
-#define TEBIBYTES_OF(N)                     (1024ULL * GIBIBYTES_OF(N))
+#define KIBIBYTES_OF(N)                     (1024ull *             (N))
+#define MEBIBYTES_OF(N)                     (1024ull * KIBIBYTES_OF(N))
+#define GIBIBYTES_OF(N)                     (1024ull * MEBIBYTES_OF(N))
+#define TEBIBYTES_OF(N)                     (1024ull * GIBIBYTES_OF(N))
 
 #if DEBUG
+	#pragma clang diagnostic push
+	#pragma clang diagnostic ignored "-Wglobal-constructors"
+
 	#include <stdio.h>
-	#pragma warning(push)
-	#pragma warning(disable : 5039)
-	#include <windows.h>
-	#pragma warning(pop)
+	#include <Windows.h>
+	#include <signal.h>
 	#undef interface
 	#undef min
 	#undef max
@@ -96,7 +105,7 @@ typedef double         f64;
 	#define DEBUG_persist static
 
 	#define DEBUG_HALT()       __debugbreak()
-	#define ASSERT(EXPRESSION) do { if (!(EXPRESSION)) { *reinterpret_cast<byte*>(0) = 0; } } while (false)
+	#define ASSERT(EXPRESSION) do { if (!(EXPRESSION)) { DEBUG_HALT(); abort(); } } while (false)
 
 	#define DEBUG_printf(FSTR, ...)\
 	do\
@@ -177,6 +186,7 @@ typedef double         f64;
 		}\
 	}\
 	while (false)
+	#pragma clang diagnostic pop
 #else
 	#define ASSERT(EXPRESSION)
 	#define DEBUG_HALT()
@@ -212,9 +222,8 @@ template <typename F>
 struct DEFER_
 {
 	F f;
-	DEFER_(F f) : f(f) {}
+	DEFER_(F f_) : f(f_) {}
 	~DEFER_() { f(); }
-	DEFER_ operator=(DEFER_&) = delete;
 };
 
 struct DEFER_EMPTY_ {};
@@ -229,7 +238,7 @@ procedure DEFER_<F> operator+(DEFER_EMPTY_, F&& f)
 // Memory.
 //
 
-#define deferred_arena_reset(ARENA) u64 MACRO_CONCAT(ARENA_CHECKPOINT_, __LINE__) = (ARENA)->used; DEFER { (ARENA)->used = MACRO_CONCAT(ARENA_CHECKPOINT_, __LINE__); };
+#define deferred_arena_reset(ARENA) u64 MACRO_CONCAT(ARENA_CHECKPOINT_, __LINE__) = (ARENA)->used; DEFER { (ARENA)->used = MACRO_CONCAT(ARENA_CHECKPOINT_, __LINE__); }
 
 struct MemoryArena
 {
@@ -248,7 +257,7 @@ procedure TYPE* allocate(MemoryArena* arena, const u64& count = 1)
 	}
 	else
 	{
-		return 0;
+		return {};
 	}
 }
 
@@ -298,18 +307,12 @@ struct vf4
 	};
 };
 
-procedure constexpr bool32 operator+ (const vf2& v              ) { return v.x || v.y;               }
-procedure constexpr bool32 operator+ (const vf3& v              ) { return v.x || v.y || v.z;        }
-procedure constexpr bool32 operator+ (const vf4& v              ) { return v.x || v.y || v.z || v.w; }
+procedure constexpr bool32 operator+ (const vf2& v              ) { return v.x != 0.0f || v.y != 0.0f;                               }
+procedure constexpr bool32 operator+ (const vf3& v              ) { return v.x != 0.0f || v.y != 0.0f || v.z != 0.0f;                }
+procedure constexpr bool32 operator+ (const vf4& v              ) { return v.x != 0.0f || v.y != 0.0f || v.z != 0.0f || v.w != 0.0f; }
 procedure constexpr vf2    operator- (const vf2& v              ) { return { -v.x, -v.y             }; }
 procedure constexpr vf3    operator- (const vf3& v              ) { return { -v.x, -v.y, -v.z       }; }
 procedure constexpr vf4    operator- (const vf4& v              ) { return { -v.x, -v.y, -v.z, -v.w }; }
-procedure constexpr bool32 operator==(const vf2& u, const vf2& v) { return u.x == v.x && u.y == v.y;                             }
-procedure constexpr bool32 operator==(const vf3& u, const vf3& v) { return u.x == v.x && u.y == v.y && u.z == v.z;               }
-procedure constexpr bool32 operator==(const vf4& u, const vf4& v) { return u.x == v.x && u.y == v.y && u.z == v.z && u.w == v.w; }
-procedure constexpr bool32 operator!=(const vf2& u, const vf2& v) { return !(u == v); }
-procedure constexpr bool32 operator!=(const vf3& u, const vf3& v) { return !(u == v); }
-procedure constexpr bool32 operator!=(const vf4& u, const vf4& v) { return !(u == v); }
 procedure constexpr vf2    operator+ (const vf2& u, const vf2& v) { return { u.x + v.x, u.y + v.y                       }; }
 procedure constexpr vf3    operator+ (const vf3& u, const vf3& v) { return { u.x + v.x, u.y + v.y, u.z + v.z            }; }
 procedure constexpr vf4    operator+ (const vf4& u, const vf4& v) { return { u.x + v.x, u.y + v.y, u.z + v.z, u.w + v.w }; }
@@ -503,7 +506,7 @@ procedure constexpr vf4    vx4(const f32& n) { return { n, n, n, n }; }
 procedure constexpr vi4    vx4(const i32& n) { return { n, n, n, n }; }
 
 template <typename TYPE>
-procedure constexpr i32 sign(const TYPE& x)
+procedure constexpr TYPE sign(const TYPE& x)
 {
 	return (static_cast<TYPE>(0) < x) - (x < static_cast<TYPE>(0));
 }
@@ -653,4 +656,4 @@ procedure constexpr String trim_whitespace(const String& str)
 	return ltrim_whitespace(rtrim_whitespace(str));
 }
 
-#pragma warning(pop)
+#pragma clang diagnostic pop

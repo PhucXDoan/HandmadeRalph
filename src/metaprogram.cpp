@@ -1,7 +1,7 @@
 #define UNICODE true
 #define TokenType TokenType_
-#include <windows.h>
-#include <shlobj_core.h>
+#include <Windows.h>
+#include <ShlObj_core.h>
 #undef TokenType
 #include "unified.h"
 #undef ASSERT
@@ -11,7 +11,8 @@ do\
 	if (!(EXPRESSION))\
 	{\
 		printf(__FILE__ " (" MACRO_STRINGIFY(__LINE__) ") :: Internal error. Assertion fired : `" #EXPRESSION "`\n");\
-		*reinterpret_cast<byte*>(0) = 0;\
+		DEBUG_HALT();\
+		exit(1);\
 	}\
 }\
 while (false)
@@ -42,14 +43,14 @@ procedure bool32 write(String file_path, String content)
 	}
 
 	{
-		i32 err = SHCreateDirectoryExW(0, dir_path_buffer, 0);
+		i32 err = SHCreateDirectoryExW({}, dir_path_buffer, {});
 		if (err != ERROR_SUCCESS && err != ERROR_ALREADY_EXISTS)
 		{
 			return false;
 		}
 	}
 
-	HANDLE handle = CreateFileW(wide_file_path, GENERIC_WRITE, 0, 0, CREATE_ALWAYS, 0, 0);
+	HANDLE handle = CreateFileW(wide_file_path, GENERIC_WRITE, 0, {}, CREATE_ALWAYS, 0, {});
 	if (handle == INVALID_HANDLE_VALUE)
 	{
 		return false;
@@ -57,7 +58,7 @@ procedure bool32 write(String file_path, String content)
 	DEFER { CloseHandle(handle); };
 
 	DWORD write_amount;
-	return content.size < (1ULL << 32) && WriteFile(handle, content.data, static_cast<DWORD>(content.size), &write_amount, 0) && write_amount == content.size;
+	return content.size < (1ull << 32) && WriteFile(handle, content.data, static_cast<DWORD>(content.size), &write_amount, {}) && write_amount == content.size;
 }
 
 struct StringBuilderCharBufferNode
@@ -121,7 +122,7 @@ do\
 {\
 	char APPENDF_BUFFER_[4096];\
 	i32 APPENDF_WRITE_AMOUNT_ = sprintf_s(APPENDF_BUFFER_, ARRAY_CAPACITY(APPENDF_BUFFER_), (FORMAT), __VA_ARGS__);\
-	ASSERT(IN_RANGE(APPENDF_WRITE_AMOUNT_, 0, ARRAY_CAPACITY(APPENDF_BUFFER_)));\
+	ASSERT(IN_RANGE(APPENDF_WRITE_AMOUNT_, 0, static_cast<i32>(ARRAY_CAPACITY(APPENDF_BUFFER_))));\
 	append((BUILDER), { static_cast<u64>(APPENDF_WRITE_AMOUNT_), APPENDF_BUFFER_ });\
 }\
 while (false)
@@ -299,7 +300,7 @@ procedure Tokenizer init_tokenizer(String file_path, MemoryArena* arena)
 			return {};
 		}
 
-		handle = CreateFileW(wide_file_path, GENERIC_READ, 0, 0, OPEN_EXISTING, 0, 0);
+		handle = CreateFileW(wide_file_path, GENERIC_READ, 0, {}, OPEN_EXISTING, 0, {});
 		if (handle == INVALID_HANDLE_VALUE)
 		{
 			return {};
@@ -316,7 +317,7 @@ procedure Tokenizer init_tokenizer(String file_path, MemoryArena* arena)
 		tokenizer.file_data = allocate<char>(arena, tokenizer.file_size);
 
 		DWORD write_amount;
-		if (tokenizer.file_size >= (1ULL << 32) || !ReadFile(handle, tokenizer.file_data, static_cast<DWORD>(tokenizer.file_size), &write_amount, 0) || write_amount != tokenizer.file_size)
+		if (tokenizer.file_size >= (1ULL << 32) || !ReadFile(handle, tokenizer.file_data, static_cast<DWORD>(tokenizer.file_size), &write_amount, {}) || write_amount != tokenizer.file_size)
 		{
 			return {};
 		}
@@ -440,7 +441,7 @@ procedure Tokenizer init_tokenizer(String file_path, MemoryArena* arena)
 				}
 			}
 		}
-		else if (is_digit(peek_read(0)) || peek_read(0) == '.' && is_digit(peek_read(1)))
+		else if (is_digit(peek_read(0)) || (peek_read(0) == '.' && is_digit(peek_read(1))))
 		{
 			// @TODO@ Proper handling of suffixes, prefixes, and decimals.
 			token.type = TokenType::number;
@@ -712,7 +713,7 @@ procedure AST* init_ast(Tokenizer* tokenizer, MemoryArena* arena)
 		if (token.type != TokenType::identifier)
 		{
 			report(String("Expected an identifier for the enum name."), tokenizer);
-			return 0;
+			return {};
 		}
 
 		ast->a_enum.name = token.text;
@@ -721,14 +722,14 @@ procedure AST* init_ast(Tokenizer* tokenizer, MemoryArena* arena)
 		if (!is_reserved(token, ':'))
 		{
 			report(String("Expected a colon to denote underlying type."), tokenizer);
-			return 0;
+			return {};
 		}
 
 		token = shift(tokenizer, 1);
 		if (token.type != TokenType::identifier)
 		{
 			report(String("Expected an identifier that would be the underlying type."), tokenizer);
-			return 0;
+			return {};
 		}
 
 		ast->a_enum.underlying_type  = allocate<AST>(arena);
@@ -747,7 +748,7 @@ procedure AST* init_ast(Tokenizer* tokenizer, MemoryArena* arena)
 		if (!is_reserved(token, '{'))
 		{
 			report(String("Expected an opening curly brace."), tokenizer);
-			return 0;
+			return {};
 		}
 
 		token = shift(tokenizer, 1);
@@ -785,7 +786,7 @@ procedure AST* init_ast(Tokenizer* tokenizer, MemoryArena* arena)
 			else
 			{
 				report(String("Expected an identifier for enum member."), tokenizer);
-				return 0;
+				return {};
 			}
 		}
 
@@ -793,7 +794,7 @@ procedure AST* init_ast(Tokenizer* tokenizer, MemoryArena* arena)
 		if (!is_reserved(token, ';'))
 		{
 			report(String("Expected semicolon."), tokenizer);
-			return 0;
+			return {};
 		}
 
 		token = shift(tokenizer, 1);
@@ -827,7 +828,7 @@ procedure AST* init_ast(Tokenizer* tokenizer, MemoryArena* arena)
 		if (!is_reserved(token, '{'))
 		{
 			report(String("Expected `{`."), tokenizer);
-			return 0;
+			return {};
 		}
 
 		ASTNode** nil = &ast->type_container.declarations;
@@ -840,7 +841,7 @@ procedure AST* init_ast(Tokenizer* tokenizer, MemoryArena* arena)
 				{
 					DEBUG_HALT();
 					report(String("Expected declaration."), tokenizer);
-					return 0;
+					return {};
 				}
 
 				*nil  = allocate<ASTNode>(arena);
@@ -850,7 +851,7 @@ procedure AST* init_ast(Tokenizer* tokenizer, MemoryArena* arena)
 			else
 			{
 				report(String("Failed to parse for decalarations."), &old_tokenizer);
-				return 0;
+				return {};
 			}
 		}
 
@@ -873,7 +874,7 @@ procedure AST* init_ast(Tokenizer* tokenizer, MemoryArena* arena)
 		if (!is_reserved(token, ';'))
 		{
 			report(String("Expected semicolon."), tokenizer);
-			return 0;
+			return {};
 		}
 
 		token = shift(tokenizer, 1);
@@ -906,7 +907,7 @@ procedure AST* init_ast(Tokenizer* tokenizer, MemoryArena* arena)
 		if (token.type != TokenType::identifier)
 		{
 			report(String("Expected name of declaration."), tokenizer);
-			return 0;
+			return {};
 		}
 
 		ast->declaration.name = token.text;
@@ -937,7 +938,7 @@ procedure AST* init_ast(Tokenizer* tokenizer, MemoryArena* arena)
 		if (!is_reserved(token, ';'))
 		{
 			report(String("Expected semicolon."), tokenizer);
-			return 0;
+			return {};
 		}
 
 		token = shift(tokenizer, 1);
@@ -952,7 +953,7 @@ procedure AST* init_ast(Tokenizer* tokenizer, MemoryArena* arena)
 	else
 	{
 		report(String("Unknown handling of token."), tokenizer);
-		return 0;
+		return {};
 	}
 }
 
@@ -1112,7 +1113,7 @@ int main()
 					append(meta_builder, String("\n"));
 				}
 
-				append(meta_builder, String("\t};"));
+				append(meta_builder, String("\t};\n"));
 
 				String meta_data = flush(meta_builder);
 				append(meta_builder, String(SRC_DIR));
@@ -1265,7 +1266,7 @@ int main()
 
 				Tokenizer      meta_tokenizer = main_tokenizer;
 				StringBuilder* meta_builder   = init_string_builder(&main_arena);
-				NamePairNode*  name_pairs     = 0;
+				NamePairNode*  name_pairs     = {};
 				Token          meta_token     = shift(&meta_tokenizer, -1);
 				for (; meta_token.type != TokenType::null && meta_token.text.data != main_token.text.data; meta_token = shift(&meta_tokenizer, -1))
 				{
@@ -1316,6 +1317,9 @@ int main()
 					}
 				}
 
+				DEBUG_printf("meow\n");
+				append(meta_builder, String("#pragma clang diagnostic push\n#pragma clang diagnostic ignored \"-Wunused-function\"\n"));
+
 				append(meta_builder, String("enum struct "));
 				append(meta_builder, file_name);
 				append(meta_builder, String("Type : u8\n{\n\tnull"));
@@ -1357,6 +1361,8 @@ int main()
 					appendf(meta_builder, "procedure %.*s    widen(const %.*s& x) { return { %.*sType::%.*s, { .%.*s = x } }; }\n", PASS_ISTR(file_name), PASS_ISTR(it->container), PASS_ISTR(file_name), PASS_ISTR(it->semantic), PASS_ISTR(it->semantic));
 					appendf(meta_builder, "procedure %.*sPtr widen(      %.*s* x) { return { %.*sType::%.*s, { .%.*s = x } }; }\n", PASS_ISTR(file_name), PASS_ISTR(it->container), PASS_ISTR(file_name), PASS_ISTR(it->semantic), PASS_ISTR(it->semantic));
 				}
+
+				append(meta_builder, String("#pragma clang diagnostic pop\n"));
 
 				String meta_data = flush(meta_builder);
 				append(meta_builder, String(SRC_DIR));

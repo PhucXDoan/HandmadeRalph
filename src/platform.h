@@ -123,6 +123,9 @@ typedef PlatformWriteFile_t(PlatformWriteFile_t);
 
 #define PlatformUpdate_t(NAME) PlatformUpdateExitCode NAME(PlatformFramebuffer* platform_framebuffer, PlatformInput* platform_input, byte* platform_memory, f32 platform_delta_time, PlatformReadFileData_t PlatformReadFileData, PlatformFreeFileData_t PlatformFreeFileData, PlatformWriteFile_t PlatformWriteFile)
 typedef PlatformUpdate_t(PlatformUpdate_t);
+extern  PlatformUpdate_t(PlatformUpdate  );
 
-#define PlatformSound_t(NAME) void NAME(PlatformSample* platform_sample_buffer, i32 platform_sample_count, i32 platform_samples_per_second, byte* platform_memory)
+#define PlatformSound_t(NAME) void NAME(PlatformSample* platform_sample_buffer, u64 platform_sample_count, i32 platform_samples_per_second, byte* platform_memory)
 typedef PlatformSound_t(PlatformSound_t);
+extern  PlatformSound_t(PlatformSound  );
+

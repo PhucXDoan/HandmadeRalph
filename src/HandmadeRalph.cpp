@@ -2,7 +2,7 @@
 #include "platform.h"
 #include "rng.cpp"
 
-#define DEBUG_AUDIO 0
+#define DEBUG_AUDIO 1
 
 // @TODO@ Handle world chunk edges.
 
@@ -210,7 +210,7 @@ procedure void draw_bmp(PlatformFramebuffer* platform_framebuffer, BMP* bmp, vi2
 			{
 				dst = top;
 			}
-			else if (top >> 24 && alpha)
+			else if ((top >> 24) && alpha > 0.0f)
 			{
 				dst =
 					(static_cast<u32>(static_cast<u8>(static_cast<f32>((dst >> 16) & 255) * (1.0f - ((top >> 24) & 255) / 255.0f * alpha) + static_cast<f32>((top >> 16) & 255) * ((top >> 24) & 255) / 255.0f * alpha)) << 16) |
@@ -260,14 +260,14 @@ struct CollisionResult
 
 procedure const CollisionResult& prioritize_collision_results(const CollisionResult& a, const CollisionResult& b)
 {
-	return b.type == CollisionType::none || a.type != CollisionType::none && a.priority > b.priority
+	return b.type == CollisionType::none || (a.type != CollisionType::none && a.priority > b.priority)
 		? a
 		: b;
 }
 
 procedure bool32 prioritize_collision_results(CollisionResult* a, const CollisionResult& b)
 {
-	if (b.type == CollisionType::none || a->type != CollisionType::none && a->priority > b.priority)
+	if (b.type == CollisionType::none || (a->type != CollisionType::none && a->priority > b.priority))
 	{
 		return false;
 	}
@@ -349,7 +349,7 @@ procedure CollisionResult collide_against_circle(vf2 displacement, vf2 center, f
 		}
 	}
 
-	if (distance_from_center > radius || radius - distance_from_center < COLLISION_EPSILON && amount_away_from_center >= 0.0f)
+	if (distance_from_center > radius || (radius - distance_from_center < COLLISION_EPSILON && amount_away_from_center >= 0.0f))
 	{
 		return {};
 	}
@@ -484,10 +484,10 @@ procedure Chunk* get_chunk(State* state, vi2 coords)
 
 procedure void process_move(EntityPtr entity, State* state, f32 delta_time)
 {
-	Chunk** chunk   = 0;
-	vf3*    rel_pos = 0;
-	vf3*    vel     = 0;
-	Shape*  shape   = 0;
+	Chunk** chunk   = {};
+	vf3*    rel_pos = {};
+	vf3*    vel     = {};
+	Shape*  shape   = {};
 
 	switch (entity.type)
 	{
@@ -504,8 +504,8 @@ procedure void process_move(EntityPtr entity, State* state, f32 delta_time)
 		GRAB(pet);
 		GRAB(monstar);
 		GRAB(rock);
-
 		#undef GRAB
+
 		default : return;
 	}
 
@@ -641,7 +641,7 @@ procedure void process_move(EntityPtr entity, State* state, f32 delta_time)
 
 		if
 		(
-			state->monstar.existence_t
+			state->monstar.existence_t > 0.0f
 			&& entity.type != EntityType::monstar
 			&& prioritize_collision_results
 				(
@@ -679,7 +679,7 @@ procedure void process_move(EntityPtr entity, State* state, f32 delta_time)
 		(
 			state->monstar.hp
 			&& state->hero.hit_t == 0.0f
-			&& (entity.type == EntityType::hero && collision_entity.type == EntityType::monstar || entity.type == EntityType::monstar && collision_entity.type == EntityType::hero)
+			&& ((entity.type == EntityType::hero && collision_entity.type == EntityType::monstar) || (entity.type == EntityType::monstar && collision_entity.type == EntityType::hero))
 		)
 		{
 			state->hero.hit_t = 1.0f;
@@ -778,7 +778,7 @@ procedure u32 rgba_from(f32 r, f32 g, f32 b)
 	return rgba_from({ r, g, b, });
 }
 
-PlatformUpdate_t(PlatformUpdate)
+extern PlatformUpdate_t(PlatformUpdate)
 {
 	State* state = reinterpret_cast<State*>(platform_memory);
 
@@ -830,17 +830,17 @@ PlatformUpdate_t(PlatformUpdate)
 
 			if
 			(
-				(header.name[0] != 'B' || header.name[1] != 'M')                   ||
-				(header.file_size != file_data.size)                               ||
-				(header.dib_header_size != 124)                                    || // @TODO@ For now only BITMAPV5HEADER.
-				(header.dims.x <= 0 || header.dims.y <= 0)                         ||
-				(header.color_planes != 1)                                         ||
-				(header.bits_per_pixel != 32)                                      || // @TODO@ For now must be RGBA.
-				(header.compression_method != 3)                                   || // @TODO@ Different compression methods and their meaning?
-				(header.pixel_data_size != 4ULL * header.dims.x * header.dims.y)   ||
-				(header.color_count != 0)                                          ||
-				(header.important_colors != 0)                                     ||
-				(~(header.mask_r | header.mask_g | header.mask_b | header.mask_a)) ||
+				(header.name[0] != 'B' || header.name[1] != 'M')                                ||
+				(header.file_size != file_data.size)                                            ||
+				(header.dib_header_size != 124)                                                 || // @TODO@ For now only BITMAPV5HEADER.
+				(header.dims.x <= 0 || header.dims.y <= 0)                                      ||
+				(header.color_planes != 1)                                                      ||
+				(header.bits_per_pixel != 32)                                                   || // @TODO@ For now must be RGBA.
+				(header.compression_method != 3)                                                || // @TODO@ Different compression methods and their meaning?
+				(header.pixel_data_size != 4 * static_cast<u32>(header.dims.x * header.dims.y)) ||
+				(header.color_count != 0)                                                       ||
+				(header.important_colors != 0)                                                  ||
+				(~(header.mask_r | header.mask_g | header.mask_b | header.mask_a))              ||
 				(  header.mask_r & header.mask_g & header.mask_b & header.mask_a )
 			)
 			{
@@ -849,7 +849,7 @@ PlatformUpdate_t(PlatformUpdate)
 			}
 
 			bmp->dims = header.dims;
-			bmp->rgba = allocate<u32>(&state->arena, static_cast<u64>(bmp->dims.x) * bmp->dims.y);
+			bmp->rgba = allocate<u32>(&state->arena, static_cast<u64>(bmp->dims.x * bmp->dims.y));
 
 			// @TODO@ Microsoft specific intrinsic...
 			u32 lz_r = __lzcnt(header.mask_r);
@@ -877,7 +877,7 @@ PlatformUpdate_t(PlatformUpdate)
 
 			FOR_RANGE(16)
 			{
-				ASSERT(IN_RANGE(chunk->tree_count, 0, ARRAY_CAPACITY(chunk->tree_buffer)));
+				ASSERT(IN_RANGE(static_cast<u32>(chunk->tree_count), 0, ARRAY_CAPACITY(chunk->tree_buffer)));
 				chunk->tree_buffer[chunk->tree_count] =
 					{
 						.rel_pos   = vxx(rng(&state->seed, 0, static_cast<i32>(METERS_PER_CHUNK)), rng(&state->seed, 0, static_cast<i32>(METERS_PER_CHUNK - 1))),
@@ -1015,7 +1015,7 @@ PlatformUpdate_t(PlatformUpdate)
 	// Update monstar.
 	//
 
-	if (state->monstar.existence_t)
+	if (state->monstar.existence_t > 0.0f)
 	{
 		if (state->monstar.hp)
 		{
@@ -1084,7 +1084,7 @@ PlatformUpdate_t(PlatformUpdate)
 			}
 			if (!colliding)
 			{
-				ASSERT(IN_RANGE(state->rock_count, 0, ARRAY_CAPACITY(state->rock_buffer)));
+				ASSERT(IN_RANGE(static_cast<u32>(state->rock_count), 0, ARRAY_CAPACITY(state->rock_buffer)));
 				state->rock_buffer[state->rock_count] =
 					{
 						.chunk       = state->hero.chunk,
@@ -1152,7 +1152,7 @@ PlatformUpdate_t(PlatformUpdate)
 	// Render.
 	//
 
-	memset(platform_framebuffer->pixels, 0, platform_framebuffer->dims.x * platform_framebuffer->dims.y * sizeof(u32));
+	memset(platform_framebuffer->pixels, 0, static_cast<u64>(platform_framebuffer->dims.x * platform_framebuffer->dims.y) * sizeof(u32));
 
 	draw_bmp(platform_framebuffer, &state->bmp.background, { 0, 0 });
 
@@ -1276,7 +1276,7 @@ PlatformUpdate_t(PlatformUpdate)
 	// Render monstar.
 	//
 
-	if (state->monstar.existence_t)
+	if (state->monstar.existence_t > 0.0f)
 	{
 		draw_circle
 		(
@@ -1297,7 +1297,7 @@ PlatformUpdate_t(PlatformUpdate)
 
 	FOR_ELEMS(rock, state->rock_buffer, state->rock_count)
 	{
-		ASSERT(IN_RANGE(rock->bmp_index, 0, ARRAY_CAPACITY(state->bmp.rocks)));
+		ASSERT(IN_RANGE(static_cast<u32>(rock->bmp_index), 0, ARRAY_CAPACITY(state->bmp.rocks)));
 		draw_circle
 		(
 			platform_framebuffer,
@@ -1330,7 +1330,7 @@ PlatformUpdate_t(PlatformUpdate)
 	return PlatformUpdateExitCode::normal;
 }
 
-PlatformSound_t(PlatformSound)
+extern PlatformSound_t(PlatformSound)
 {
 	#if DEBUG_AUDIO
 	State* state = reinterpret_cast<State*>(platform_memory);
@@ -1338,7 +1338,7 @@ PlatformSound_t(PlatformSound)
 	FOR_ELEMS(sample, platform_sample_buffer, platform_sample_count)
 	{
 		*sample   = { static_cast<i16>(sinf(state->t) * 1250.0f), static_cast<i16>(sinf(state->t) * 1250.0f) };
-		state->t += TAU * state->hertz / platform_samples_per_second;
+		state->t += TAU * state->hertz / static_cast<f32>(platform_samples_per_second);
 	}
 	#endif
 }

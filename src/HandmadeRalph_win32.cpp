@@ -1,17 +1,16 @@
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wlanguage-extension-token"
 #undef UNICODE
 #define UNICODE true
-#pragma warning(push)
-#pragma warning(disable : 5039 4820 4061 4365)
-#include <windows.h>
+#include <Windows.h>
 #include <windowsx.h>
-#include <xinput.h>
+#include <Xinput.h>
 #include <dsound.h>
 #include <dxgi.h>
-#pragma warning(pop)
 #include "unified.h"
 #include "platform.h"
 
-#define PROCESS_PLATFORM_BUTTON(BUTTON, IS_DOWN) MACRO_CONCAT(g_platform_input.button, BUTTON) = static_cast<u8>(((MACRO_CONCAT(g_platform_input.button, BUTTON) + ((MACRO_CONCAT(g_platform_input.button, BUTTON) >> 7) != static_cast<bool8>(IS_DOWN))) & 0b01111111) | ((IS_DOWN) << 7))
+#define PROCESS_PLATFORM_BUTTON(BUTTON, IS_DOWN) g_platform_input.button BUTTON = static_cast<u8>(((g_platform_input.button BUTTON + ((g_platform_input.button BUTTON >> 7) != static_cast<bool8>(IS_DOWN))) & 0b01111111) | ((IS_DOWN) << 7))
 
 #define   XInputGetState_t(NAME) DWORD NAME(DWORD dwUserIndex, XINPUT_STATE *pState)
 typedef   XInputGetState_t(XInputGetState_t);
@@ -21,13 +20,7 @@ global    XInputGetState_t* g_XInputGetState = stub_XInputGetState;
 global vi2           g_client_dims                   = { 0, 0 };
 global PlatformInput g_platform_input                = {};
 global i32           g_unfreed_file_data_counter     = 0;
-global i64           g_performance_counter_frequency =
-	[]()
-	{
-		LARGE_INTEGER n;
-		QueryPerformanceFrequency(&n);
-		return n.QuadPart;
-	}();
+global i64           g_performance_counter_frequency = 0;
 
 #if DEBUG
 struct Hotloader
@@ -63,25 +56,25 @@ procedure Hotloader DEBUG_hotload()
 	hotloader.PlatformSound = reinterpret_cast<PlatformSound_t*>(GetProcAddress(hotloader.handle, "PlatformSound"));
 	ASSERT(hotloader.PlatformSound);
 
-	DEBUG_printf(__FILE__ " :: " __FUNCTION__ " :: Hotloaded.\n");
+	DEBUG_printf(__FILE__ " :: %s :: Hotloaded.\n", __func__);
 	return hotloader;
 }
 #endif
 
-PlatformReadFileData_t(PlatformReadFileData)
+procedure PlatformReadFileData_t(PlatformReadFileData)
 {
 	wchar_t wide_file_path[256];
 	u64     wide_file_path_count;
 	if (mbstowcs_s(&wide_file_path_count, wide_file_path, platform_file_path.data, platform_file_path.size) || wide_file_path_count != platform_file_path.size + 1)
 	{
-		DEBUG_printf(__FILE__ " :: " __FUNCTION__ " :: Failed to convert file path `%S` to wide string.\n", wide_file_path);
+		DEBUG_printf(__FILE__ " :: %s :: Failed to convert file path `%S` to wide string.\n", __func__, wide_file_path);
 		return {};
 	}
 
-	HANDLE handle = CreateFileW(wide_file_path, GENERIC_READ, FILE_SHARE_READ, 0, OPEN_EXISTING, 0, 0);
+	HANDLE handle = CreateFileW(wide_file_path, GENERIC_READ, FILE_SHARE_READ, {}, OPEN_EXISTING, 0, {});
 	if (handle == INVALID_HANDLE_VALUE)
 	{
-		DEBUG_printf(__FILE__ " :: " __FUNCTION__ " :: Failed to open file `%S` for reading.\n", wide_file_path);
+		DEBUG_printf(__FILE__ " :: %s :: Failed to open file `%S` for reading.\n", __func__, wide_file_path);
 		return {};
 	}
 	DEFER { CloseHandle(handle); };
@@ -89,40 +82,40 @@ PlatformReadFileData_t(PlatformReadFileData)
 	LARGE_INTEGER file_size;
 	if (!GetFileSizeEx(handle, &file_size))
 	{
-		DEBUG_printf(__FILE__ " :: " __FUNCTION__ " :: Failed to get size of `%S`.\n", wide_file_path);
+		DEBUG_printf(__FILE__ " :: %s :: Failed to get size of `%S`.\n", __func__, wide_file_path);
 		return {};
 	}
 
 	PlatformFileData platform_file_data =
 		{
 			.size = static_cast<u64>(file_size.QuadPart),
-			.data = reinterpret_cast<byte*>(VirtualAlloc(0, static_cast<SIZE_T>(file_size.QuadPart), MEM_COMMIT, PAGE_READWRITE))
+			.data = reinterpret_cast<byte*>(VirtualAlloc({}, static_cast<SIZE_T>(file_size.QuadPart), MEM_COMMIT, PAGE_READWRITE))
 		};
 
 	// @TODO@ Larger file sizes.
 	if (platform_file_data.size > 0xFFFFFFFF)
 	{
-		DEBUG_printf(__FILE__ " :: " __FUNCTION__ " :: File `%S` is too big (`%zu` bytes); must be less than 2^32 bytes (4.29GB).\n", wide_file_path, platform_file_data.size);
+		DEBUG_printf(__FILE__ " :: %s :: File `%S` is too big (`%zu` bytes); must be less than 2^32 bytes (4.29GB).\n", __func__, wide_file_path, platform_file_data.size);
 		return {};
 	}
 
 	if (!platform_file_data.data)
 	{
-		DEBUG_printf(__FILE__ " :: " __FUNCTION__ " :: Failed to allocate `%zu` bytes for `%S`.\n", platform_file_data.size, wide_file_path);
+		DEBUG_printf(__FILE__ " :: %s :: Failed to allocate `%zu` bytes for `%S`.\n", __func__, platform_file_data.size, wide_file_path);
 		return {};
 	}
 
 	DWORD read_size;
-	if (!ReadFile(handle, platform_file_data.data, static_cast<u32>(platform_file_data.size), &read_size, 0))
+	if (!ReadFile(handle, platform_file_data.data, static_cast<u32>(platform_file_data.size), &read_size, {}))
 	{
-		DEBUG_printf(__FILE__ " :: " __FUNCTION__ " :: Failed to read file `%S`.\n", wide_file_path);
+		DEBUG_printf(__FILE__ " :: %s :: Failed to read file `%S`.\n", __func__, wide_file_path);
 		VirtualFree(platform_file_data.data, 0, MEM_RELEASE);
 		return {};
 	}
 
 	if (read_size != platform_file_data.size)
 	{
-		DEBUG_printf(__FILE__ " :: " __FUNCTION__ " :: Incomplete read of `%ld` out of `%zu` bytes of `%S`.\n", read_size, platform_file_data.size, wide_file_path);
+		DEBUG_printf(__FILE__ " :: %s :: Incomplete read of `%ld` out of `%zu` bytes of `%S`.\n", __func__, read_size, platform_file_data.size, wide_file_path);
 		VirtualFree(platform_file_data.data, 0, MEM_RELEASE);
 		return {};
 	}
@@ -131,27 +124,27 @@ PlatformReadFileData_t(PlatformReadFileData)
 	return platform_file_data;
 }
 
-PlatformFreeFileData_t(PlatformFreeFileData)
+procedure PlatformFreeFileData_t(PlatformFreeFileData)
 {
 	ASSERT(platform_file_data->data);
 	VirtualFree(platform_file_data->data, 0, MEM_RELEASE);
 	g_unfreed_file_data_counter -= 1;
 }
 
-PlatformWriteFile_t(PlatformWriteFile)
+procedure PlatformWriteFile_t(PlatformWriteFile)
 {
 	wchar_t wide_file_path[256];
 	u64     wide_file_path_count;
 	if (mbstowcs_s(&wide_file_path_count, wide_file_path, platform_file_path.data, platform_file_path.size) || wide_file_path_count != platform_file_path.size + 1)
 	{
-		DEBUG_printf(__FILE__ " :: " __FUNCTION__ " :: Failed to convert file path `%S` to wide string.\n", wide_file_path);
+		DEBUG_printf(__FILE__ " :: %s :: Failed to convert file path `%S` to wide string.\n", __func__, wide_file_path);
 		return {};
 	}
 
-	HANDLE handle = CreateFileW(wide_file_path, GENERIC_WRITE, 0, 0, CREATE_ALWAYS, 0, 0);
+	HANDLE handle = CreateFileW(wide_file_path, GENERIC_WRITE, 0, {}, CREATE_ALWAYS, 0, {});
 	if (handle == INVALID_HANDLE_VALUE)
 	{
-		DEBUG_printf(__FILE__ " :: " __FUNCTION__ " :: Failed to open file `%S` for writing.\n", wide_file_path);
+		DEBUG_printf(__FILE__ " :: %s :: Failed to open file `%S` for writing.\n", __func__, wide_file_path);
 		return false;
 	}
 	DEFER { CloseHandle(handle); };
@@ -159,20 +152,20 @@ PlatformWriteFile_t(PlatformWriteFile)
 	// @TODO@ Larger file sizes.
 	if (platform_write_size > 0xFFFFFFFF)
 	{
-		DEBUG_printf(__FILE__ " :: " __FUNCTION__ " :: `%zu` bytes is too big to write out to `%S`; must be less than 2^32 bytes (4.29GB).\n", platform_write_size, wide_file_path);
+		DEBUG_printf(__FILE__ " :: %s :: `%zu` bytes is too big to write out to `%S`; must be less than 2^32 bytes (4.29GB).\n", __func__, platform_write_size, wide_file_path);
 		return false;
 	}
 
 	DWORD write_size;
-	if (!WriteFile(handle, platform_write_data, static_cast<u32>(platform_write_size), &write_size, 0))
+	if (!WriteFile(handle, platform_write_data, static_cast<u32>(platform_write_size), &write_size, {}))
 	{
-		DEBUG_printf(__FILE__ " :: " __FUNCTION__ " :: Failed to write into `%S`.\n", wide_file_path);
+		DEBUG_printf(__FILE__ " :: %s :: Failed to write into `%S`.\n", __func__, wide_file_path);
 		return false;
 	}
 
 	if (write_size != platform_write_size)
 	{
-		DEBUG_printf(__FILE__ " :: " __FUNCTION__ " :: Incomplete write of `%ld` out of `%zu` bytes to `%S`.\n", write_size, platform_write_size, wide_file_path);
+		DEBUG_printf(__FILE__ " :: %s :: Incomplete write of `%ld` out of `%zu` bytes to `%S`.\n", __func__, write_size, platform_write_size, wide_file_path);
 		return false;
 	}
 
@@ -188,7 +181,7 @@ procedure i64 query_performance_counter(void)
 
 procedure f32 calc_performance_counter_delta_time(i64 start, i64 end)
 {
-	return static_cast<f32>(end - start) / g_performance_counter_frequency;
+	return static_cast<f32>(end - start) / static_cast<f32>(g_performance_counter_frequency);
 }
 
 procedure LRESULT window_procedure_callback(HWND window, UINT message, WPARAM wparam, LPARAM lparam)
@@ -212,8 +205,8 @@ procedure LRESULT window_procedure_callback(HWND window, UINT message, WPARAM wp
 		case WM_KEYDOWN:
 		case WM_KEYUP:
 		{
-			bool8 was_down = (lparam & (1 << 30)) != 0;
-			bool8 is_down  = (lparam & (1 << 31)) == 0;
+			bool8 was_down = (static_cast<u32>(lparam) & (1ull << 30)) != 0;
+			bool8 is_down  = (static_cast<u32>(lparam) & (1ull << 31)) == 0;
 			if (!(was_down && is_down))
 			{
 				if (IN_RANGE(wparam, 'A', 'Z' + 1))
@@ -258,10 +251,7 @@ procedure LRESULT window_procedure_callback(HWND window, UINT message, WPARAM wp
 			g_platform_input.mouse_scroll = GET_WHEEL_DELTA_WPARAM(wparam);
 		} break;
 
-		default:
-		{
-			return DefWindowProc(window, message, wparam, lparam);
-		} break;
+		default: return DefWindowProc(window, message, wparam, lparam);
 	}
 
 	return 0;
@@ -269,6 +259,12 @@ procedure LRESULT window_procedure_callback(HWND window, UINT message, WPARAM wp
 
 int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int cmd_show)
 {
+	{
+		LARGE_INTEGER n;
+		QueryPerformanceFrequency(&n);
+		g_performance_counter_frequency = n.QuadPart;
+	}
+
 	//
 	// Initialize window.
 	//
@@ -293,7 +289,7 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int cmd_show)
 			.style         = CS_HREDRAW | CS_VREDRAW,
 			.lpfnWndProc   = window_procedure_callback,
 			.hInstance     = instance,
-			.hCursor       = LoadCursor(0, IDC_CROSS),
+			.hCursor       = LoadCursor({}, IDC_CROSS),
 			.lpszClassName = CLASS_NAME
 		};
 
@@ -324,10 +320,10 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int cmd_show)
 				DEBUG ? 256 : CW_USEDEFAULT,
 				rect.right  - rect.left,
 				rect.bottom - rect.top,
-				0,
-				0,
+				{},
+				{},
 				instance,
-				0
+				{}
 			);
 	}
 	if (!window)
@@ -380,7 +376,7 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int cmd_show)
 		ASSERT(l_DirectSoundCreate);
 
 		IDirectSound* directsound;
-		if (l_DirectSoundCreate(0, &directsound, 0) != DS_OK)
+		if (l_DirectSoundCreate({}, &directsound, {}) != DS_OK)
 		{
 			DEBUG_printf(__FILE__ " :: DirectSound :: Failed to create object.\n");
 			return -1;
@@ -398,7 +394,7 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int cmd_show)
 				.dwFlags = DSBCAPS_PRIMARYBUFFER
 			};
 		IDirectSoundBuffer* primary_buffer;
-		if (directsound->CreateSoundBuffer(&primary_buffer_description, &primary_buffer, 0) != DS_OK)
+		if (directsound->CreateSoundBuffer(&primary_buffer_description, &primary_buffer, {}) != DS_OK)
 		{
 			DEBUG_printf(__FILE__ " :: DirectSound :: Failed to create primary buffer.\n");
 			return -1;
@@ -423,7 +419,7 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int cmd_show)
 				.dwBufferBytes = SOUNDBUFFER_SIZE,
 				.lpwfxFormat   = &primary_buffer_format
 			};
-		if (directsound->CreateSoundBuffer(&secondary_buffer_description, &directsound_buffer, 0) != DS_OK)
+		if (directsound->CreateSoundBuffer(&secondary_buffer_description, &directsound_buffer, {}) != DS_OK)
 		{
 			DEBUG_printf(__FILE__ " :: DirectSound :: Failed to create secondary buffer.\n");
 			return -1;
@@ -482,9 +478,8 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int cmd_show)
 	constexpr i32 SAMPLES_OF_LATENCY              = max(MAXIMUM_SAMPLES_PER_UPDATE, SAMPLES_PER_SECOND / 30);
 	constexpr i32 PLATFORM_SAMPLE_BUFFER_CAPACITY = 4 * MAXIMUM_SAMPLES_PER_UPDATE;
 
-	bool32          is_sleep_granular      = timeBeginPeriod(1) == TIMERR_NOERROR;
-	byte*           backbuffer_bitmap_data = reinterpret_cast<byte*>(VirtualAlloc(0, static_cast<size_t>(4) * BACKBUFFER_BITMAP_INFO.bmiHeader.biWidth * -BACKBUFFER_BITMAP_INFO.bmiHeader.biHeight, MEM_COMMIT, PAGE_READWRITE));
-	PlatformSample* platform_sample_buffer = reinterpret_cast<PlatformSample*>(VirtualAlloc(0, PLATFORM_SAMPLE_BUFFER_CAPACITY * sizeof(PlatformSample), MEM_COMMIT, PAGE_READWRITE));
+	byte*           backbuffer_bitmap_data = reinterpret_cast<byte*>(VirtualAlloc({}, static_cast<size_t>(4) * BACKBUFFER_BITMAP_INFO.bmiHeader.biWidth * -BACKBUFFER_BITMAP_INFO.bmiHeader.biHeight, MEM_COMMIT, PAGE_READWRITE));
+	PlatformSample* platform_sample_buffer = reinterpret_cast<PlatformSample*>(VirtualAlloc({}, PLATFORM_SAMPLE_BUFFER_CAPACITY * sizeof(PlatformSample), MEM_COMMIT, PAGE_READWRITE));
 	byte*           platform_memory        =
 		#if DEBUG
 		reinterpret_cast<byte*>(VirtualAlloc(reinterpret_cast<void*>(TEBIBYTES_OF(8)), PLATFORM_MEMORY_SIZE, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE));
@@ -508,7 +503,7 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int cmd_show)
 	};
 
 	bool32 is_computed_sample_on_time = false;
-	i32    last_computed_sample_index = 0;
+	u64    last_computed_sample_index = 0;
 	f32    update_countdown           = 0.0f; // @TODO@ Better update timer?
 	i64    performance_counter_start;
 	while (true)
@@ -519,7 +514,7 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int cmd_show)
 		// Input.
 		//
 
-		for (MSG message; PeekMessageW(&message, 0, 0, 0, PM_REMOVE);)
+		for (MSG message; PeekMessageW(&message, {}, 0, 0, PM_REMOVE);)
 		{
 			TranslateMessage(&message);
 			DispatchMessage(&message);
@@ -575,10 +570,10 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int cmd_show)
 				// @TODO@ Better deadzoning.
 				constexpr f32 DEADZONE_MIN = 0.075f;
 				constexpr f32 DEADZONE_MAX = 0.8f;
-				g_platform_input.gamepads[i].stick_left.x  = sign(gamepad_state.Gamepad.sThumbLX) * clamp((fabsf(gamepad_state.Gamepad.sThumbLX / 32768.0f) - DEADZONE_MIN) / (DEADZONE_MAX - DEADZONE_MIN), 0.0f, 1.0f);
-				g_platform_input.gamepads[i].stick_left.y  = sign(gamepad_state.Gamepad.sThumbLY) * clamp((fabsf(gamepad_state.Gamepad.sThumbLY / 32768.0f) - DEADZONE_MIN) / (DEADZONE_MAX - DEADZONE_MIN), 0.0f, 1.0f);
-				g_platform_input.gamepads[i].stick_right.x = sign(gamepad_state.Gamepad.sThumbRX) * clamp((fabsf(gamepad_state.Gamepad.sThumbRX / 32768.0f) - DEADZONE_MIN) / (DEADZONE_MAX - DEADZONE_MIN), 0.0f, 1.0f);
-				g_platform_input.gamepads[i].stick_right.y = sign(gamepad_state.Gamepad.sThumbRY) * clamp((fabsf(gamepad_state.Gamepad.sThumbRY / 32768.0f) - DEADZONE_MIN) / (DEADZONE_MAX - DEADZONE_MIN), 0.0f, 1.0f);
+				g_platform_input.gamepads[i].stick_left.x  = sign(gamepad_state.Gamepad.sThumbLX) * clamp((fabsf(static_cast<f32>(gamepad_state.Gamepad.sThumbLX) / 32768.0f) - DEADZONE_MIN) / (DEADZONE_MAX - DEADZONE_MIN), 0.0f, 1.0f);
+				g_platform_input.gamepads[i].stick_left.y  = sign(gamepad_state.Gamepad.sThumbLY) * clamp((fabsf(static_cast<f32>(gamepad_state.Gamepad.sThumbLY) / 32768.0f) - DEADZONE_MIN) / (DEADZONE_MAX - DEADZONE_MIN), 0.0f, 1.0f);
+				g_platform_input.gamepads[i].stick_right.x = sign(gamepad_state.Gamepad.sThumbRX) * clamp((fabsf(static_cast<f32>(gamepad_state.Gamepad.sThumbRX) / 32768.0f) - DEADZONE_MIN) / (DEADZONE_MAX - DEADZONE_MIN), 0.0f, 1.0f);
+				g_platform_input.gamepads[i].stick_right.y = sign(gamepad_state.Gamepad.sThumbRY) * clamp((fabsf(static_cast<f32>(gamepad_state.Gamepad.sThumbRY) / 32768.0f) - DEADZONE_MIN) / (DEADZONE_MAX - DEADZONE_MIN), 0.0f, 1.0f);
 			}
 			else
 			{
@@ -650,7 +645,7 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int cmd_show)
 				DEBUG_persist PlaybackState playback_state        = PlaybackState::null;
 				DEBUG_persist HANDLE        playback_file         = INVALID_HANDLE_VALUE;
 				DEBUG_persist HANDLE        playback_file_mapping = INVALID_HANDLE_VALUE;
-				DEBUG_persist byte*         playback_data         = 0;
+				DEBUG_persist byte*         playback_data         = {};
 				DEBUG_persist u64           playback_size         = 0;
 				DEBUG_persist i32           playback_input_index  = 0;
 
@@ -672,7 +667,7 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int cmd_show)
 						if (playback_data)
 						{
 							UnmapViewOfFile(playback_data);
-							playback_data = 0;
+							playback_data = {};
 						}
 					};
 
@@ -682,7 +677,7 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int cmd_show)
 					{
 						if (playback_state == PlaybackState::null)
 						{
-							playback_file = CreateFileW(PLAYBACK_FILE_PATH, GENERIC_READ, 0, 0, OPEN_EXISTING, 0, 0);
+							playback_file = CreateFileW(PLAYBACK_FILE_PATH, GENERIC_READ, 0, {}, OPEN_EXISTING, 0, {});
 							if (playback_file == INVALID_HANDLE_VALUE)
 							{
 								DEBUG_printf(__FILE__ " :: Failed to reload `%S` for playback.\n", PLAYBACK_FILE_PATH);
@@ -690,7 +685,7 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int cmd_show)
 								goto ABORT_PLAYBACK;
 							}
 
-							playback_file_mapping = CreateFileMappingW(playback_file, 0, PAGE_READONLY, 0, 0, 0);
+							playback_file_mapping = CreateFileMappingW(playback_file, {}, PAGE_READONLY, 0, 0, {});
 							if (playback_file_mapping == INVALID_HANDLE_VALUE)
 							{
 								DEBUG_printf(__FILE__ " :: Failed to file map `%S`; aborting reloaded playback.\n", PLAYBACK_FILE_PATH);
@@ -739,7 +734,7 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int cmd_show)
 							{
 								playback_state = PlaybackState::recording;
 
-								playback_file = CreateFileW(PLAYBACK_FILE_PATH, GENERIC_READ | GENERIC_WRITE, 0, 0, CREATE_ALWAYS, 0, 0);
+								playback_file = CreateFileW(PLAYBACK_FILE_PATH, GENERIC_READ | GENERIC_WRITE, 0, {}, CREATE_ALWAYS, 0, {});
 								if (playback_file == INVALID_HANDLE_VALUE)
 								{
 									DEBUG_printf(__FILE__ " :: Failed to create `%S` for playback.\n", PLAYBACK_FILE_PATH);
@@ -748,7 +743,7 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int cmd_show)
 								}
 
 								DWORD resulting_write_size;
-								if (!WriteFile(playback_file, platform_memory, PLATFORM_MEMORY_SIZE, &resulting_write_size, 0) || resulting_write_size != PLATFORM_MEMORY_SIZE)
+								if (!WriteFile(playback_file, platform_memory, PLATFORM_MEMORY_SIZE, &resulting_write_size, {}) || resulting_write_size != PLATFORM_MEMORY_SIZE)
 								{
 									DEBUG_printf(__FILE__ " :: Recorded `%lu` out of `%zu` bytes of memory to `%S`; aborting playback.\n", resulting_write_size, PLATFORM_MEMORY_SIZE, PLAYBACK_FILE_PATH);
 									stop_playback();
@@ -762,7 +757,7 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int cmd_show)
 							{
 								playback_state = PlaybackState::replaying;
 
-								playback_file_mapping = CreateFileMappingW(playback_file, 0, PAGE_READONLY, 0, 0, 0);
+								playback_file_mapping = CreateFileMappingW(playback_file, {}, PAGE_READONLY, 0, 0, {});
 								if (playback_file_mapping == INVALID_HANDLE_VALUE)
 								{
 									DEBUG_printf(__FILE__ " :: Failed to file map `%S`; aborting playback.\n", PLAYBACK_FILE_PATH);
@@ -811,7 +806,7 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int cmd_show)
 				if (playback_state == PlaybackState::recording)
 				{
 					DWORD resulting_write_size;
-					if (!WriteFile(playback_file, &g_platform_input, sizeof(PlatformInput), &resulting_write_size, 0) || resulting_write_size != sizeof(PlatformInput))
+					if (!WriteFile(playback_file, &g_platform_input, sizeof(PlatformInput), &resulting_write_size, {}) || resulting_write_size != sizeof(PlatformInput))
 					{
 						DEBUG_printf(__FILE__ " :: Recorded `%lu` out of `%zu` bytes of input to `%S`; aborting playback.\n", resulting_write_size, sizeof(PlatformInput), PLAYBACK_FILE_PATH);
 						stop_playback();
@@ -882,20 +877,20 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int cmd_show)
 					if (!is_computed_sample_on_time)
 					{
 						is_computed_sample_on_time = true;
-						last_computed_sample_index = static_cast<i32>(writer_byte_offset / sizeof(PlatformSample));
+						last_computed_sample_index = writer_byte_offset / sizeof(PlatformSample);
 					}
 
-					i32 player_sample_index            = static_cast<i32>(player_byte_offset / sizeof(PlatformSample));
-					i32 abs_last_computed_sample_index = last_computed_sample_index;
-					if (abs_last_computed_sample_index < player_sample_index)
+					i64 player_sample_index            = player_byte_offset / sizeof(PlatformSample);
+					u64 abs_last_computed_sample_index = last_computed_sample_index;
+					if (static_cast<i64>(abs_last_computed_sample_index) < player_sample_index)
 					{
 						abs_last_computed_sample_index += SOUNDBUFFER_CAPACITY;
 					}
 
-					if (abs_last_computed_sample_index >= static_cast<i32>(writer_byte_offset / sizeof(PlatformSample)) + SOUNDBUFFER_CAPACITY * (writer_byte_offset < player_byte_offset))
+					if (abs_last_computed_sample_index >= static_cast<u64>(writer_byte_offset / sizeof(PlatformSample)) + SOUNDBUFFER_CAPACITY * (writer_byte_offset < player_byte_offset))
 					{
 						i32 abs_sample_index_after_next_update = static_cast<i32>(ceilf((SECONDS_PER_UPDATE - calc_performance_counter_delta_time(performance_counter_start, query_performance_counter())) * SAMPLES_PER_SECOND));
-						i32 new_computed_sample_count          = player_sample_index + abs_sample_index_after_next_update - abs_last_computed_sample_index + (1 + (MAXIMUM_SAMPLES_PER_UPDATE + SAMPLES_OF_LATENCY - abs_sample_index_after_next_update) / MAXIMUM_SAMPLES_PER_UPDATE) * MAXIMUM_SAMPLES_PER_UPDATE;
+						i64 new_computed_sample_count          = player_sample_index + static_cast<i64>(abs_sample_index_after_next_update) - static_cast<i64>(abs_last_computed_sample_index) + (1LL + (MAXIMUM_SAMPLES_PER_UPDATE + SAMPLES_OF_LATENCY - abs_sample_index_after_next_update) / MAXIMUM_SAMPLES_PER_UPDATE) * MAXIMUM_SAMPLES_PER_UPDATE;
 						if (new_computed_sample_count > 0)
 						{
 							if (new_computed_sample_count > PLATFORM_SAMPLE_BUFFER_CAPACITY)
@@ -909,9 +904,9 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int cmd_show)
 								DWORD region_size_0;
 								byte* region_1;
 								DWORD region_size_1;
-								if (directsound_buffer->Lock(last_computed_sample_index * sizeof(PlatformSample), new_computed_sample_count * sizeof(PlatformSample), reinterpret_cast<void**>(&region_0), &region_size_0, reinterpret_cast<void**>(&region_1), &region_size_1, 0) == DS_OK)
+								if (directsound_buffer->Lock(static_cast<u32>(last_computed_sample_index) * sizeof(PlatformSample), static_cast<u32>(new_computed_sample_count) * sizeof(PlatformSample), reinterpret_cast<void**>(&region_0), &region_size_0, reinterpret_cast<void**>(&region_1), &region_size_1, 0) == DS_OK)
 								{
-									hotloader.PlatformSound(platform_sample_buffer, new_computed_sample_count, SAMPLES_PER_SECOND, platform_memory);
+									hotloader.PlatformSound(platform_sample_buffer, static_cast<u64>(new_computed_sample_count), SAMPLES_PER_SECOND, platform_memory);
 
 									PlatformSample* curr_sample = platform_sample_buffer;
 
@@ -929,7 +924,7 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int cmd_show)
 										curr_sample += 1;
 									}
 
-									last_computed_sample_index = (last_computed_sample_index + new_computed_sample_count) % SOUNDBUFFER_CAPACITY;
+									last_computed_sample_index = (last_computed_sample_index + static_cast<u64>(new_computed_sample_count)) % SOUNDBUFFER_CAPACITY;
 									directsound_buffer->Unlock(region_0, region_size_0, region_1, region_size_1);
 								}
 								else
@@ -1003,3 +998,5 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int cmd_show)
 
 	return 0;
 }
+
+#pragma clang diagnostic pop
