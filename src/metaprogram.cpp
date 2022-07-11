@@ -4,6 +4,7 @@
 #include <ShlObj_core.h>
 #include <strsafe.h>
 #undef TokenType
+#include <stdio.h>
 #include "unified.h"
 #undef ASSERT
 #define ASSERT(EXPRESSION)\
@@ -115,6 +116,41 @@ procedure FilePathsInResult file_paths_in(String dir_path, MemoryArena* arena)
 			return {};
 		}
 	}
+}
+
+procedure bool32 read(char** data, u64* size, String file_path, MemoryArena* arena)
+{
+	HANDLE  handle;
+	wchar_t wide_file_path[MAX_PATH];
+	u64     wide_file_path_count;
+	if (mbstowcs_s(&wide_file_path_count, wide_file_path, file_path.data, file_path.size) || wide_file_path_count != file_path.size + 1)
+	{
+		return false;
+	}
+
+	handle = CreateFileW(wide_file_path, GENERIC_READ, 0, {}, OPEN_EXISTING, 0, {});
+	if (handle == INVALID_HANDLE_VALUE)
+	{
+		return false;
+	}
+	DEFER { CloseHandle(handle); };
+
+	LARGE_INTEGER file_size;
+	if (!GetFileSizeEx(handle, &file_size))
+	{
+		return false;
+	}
+
+	*size = static_cast<u64>(file_size.QuadPart);
+	*data = allocate<char>(arena, *size);
+
+	DWORD write_amount;
+	if (*size >= (1ULL << 32) || !ReadFile(handle, *data, static_cast<DWORD>(*size), &write_amount, 0) || write_amount != *size)
+	{
+		return false;
+	}
+
+	return true;
 }
 
 procedure bool32 write(String file_path, String content)
@@ -398,36 +434,9 @@ procedure Tokenizer init_tokenizer(String file_path, MemoryArena* arena)
 			.file_path = file_path
 		};
 
+	if (!read(&tokenizer.file_data, &tokenizer.file_size, file_path, arena))
 	{
-		HANDLE handle;
-		wchar_t wide_file_path[MAX_PATH];
-		u64     wide_file_path_count;
-		if (mbstowcs_s(&wide_file_path_count, wide_file_path, file_path.data, file_path.size) || wide_file_path_count != file_path.size + 1)
-		{
-			return {};
-		}
-
-		handle = CreateFileW(wide_file_path, GENERIC_READ, 0, {}, OPEN_EXISTING, 0, {});
-		if (handle == INVALID_HANDLE_VALUE)
-		{
-			return {};
-		}
-		DEFER { CloseHandle(handle); };
-
-		LARGE_INTEGER file_size;
-		if (!GetFileSizeEx(handle, &file_size))
-		{
-			return {};
-		}
-
-		tokenizer.file_size = static_cast<u64>(file_size.QuadPart);
-		tokenizer.file_data = allocate<char>(arena, tokenizer.file_size);
-
-		DWORD write_amount;
-		if (tokenizer.file_size >= (1ULL << 32) || !ReadFile(handle, tokenizer.file_data, static_cast<DWORD>(tokenizer.file_size), &write_amount, {}) || write_amount != tokenizer.file_size)
-		{
-			return {};
-		}
+		return {};
 	}
 
 	tokenizer.curr_node = allocate<TokenBufferNode>(arena);
@@ -1065,6 +1074,21 @@ procedure AST* init_ast(Tokenizer* tokenizer, MemoryArena* arena)
 
 int main()
 {
+	//DEFER { DEBUG_STDOUT_HALT(); };
+
+	LARGE_INTEGER performance_counter_start;
+	QueryPerformanceCounter(&performance_counter_start);
+	DEFER
+	{
+		LARGE_INTEGER performance_counter_end;
+		QueryPerformanceCounter(&performance_counter_end);
+
+		LARGE_INTEGER performance_frequency;
+		QueryPerformanceFrequency(&performance_frequency);
+
+		printf(":: metaprogram.exe : %.0fms\n", 1000.0 * static_cast<f64>(performance_counter_end.QuadPart - performance_counter_start.QuadPart) / static_cast<f64>(performance_frequency.QuadPart));
+	};
+
 	MemoryArena main_arena = {};
 	main_arena.size = MEBIBYTES_OF(1);
 	main_arena.data = reinterpret_cast<byte*>(malloc(main_arena.size));
@@ -1506,7 +1530,6 @@ int main()
 			}
 		}
 	}
-
 
 	return 0;
 }

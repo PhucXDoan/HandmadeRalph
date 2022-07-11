@@ -2,6 +2,7 @@
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wunused-function"
 #pragma clang diagnostic ignored "-Wunused-template"
+#pragma clang diagnostic ignored "-Wunused-macros"
 
 #include <stdint.h>
 typedef uint8_t        byte;

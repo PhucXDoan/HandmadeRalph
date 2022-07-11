@@ -10,15 +10,13 @@ set COMMON_COMPILER_FLAGS=^
 	-Wno-deprecated-copy-with-user-provided-dtor -Wno-missing-braces   -Wno-gnu-anonymous-struct -Wno-nested-anon-types     -Wno-cast-function-type                -Wno-disabled-macro-expansion^
 	-Wno-switch-enum -Wno-zero-as-null-pointer-constant
 
-set DEBUG_COMPILER_FLAGS=%COMMON_COMPILER_FLAGS% -O0 -g -gcodeview -DDEBUG=1 -Wno-unused-parameter -Wno-unused-command-line-argument -Wno-unused-function -Wno-unused-variable
+set DEBUG_COMPILER_FLAGS=%COMMON_COMPILER_FLAGS% -O0 -g -gcodeview -DDEBUG=1 -Wno-unused-parameter -Wno-unused-command-line-argument -Wno-unused-function -Wno-unused-variable -Wno-unused-macros
 
 if not exist W:\build\ (
 	mkdir W:\build\
 )
 
 pushd W:\build\
-	set t0=%time: =0%
-
 	IF exist W:\src\META\ (
 		del W:\src\META\ /S /Q >nul
 	)
@@ -36,6 +34,8 @@ pushd W:\build\
 		) else (
 			move /y metaprogram.new.cpp metaprogram.old.cpp > nul
 		)
+	) else (
+		del metaprogram.new.cpp
 	)
 
 	echo :: metaprogram.exe
@@ -46,14 +46,15 @@ pushd W:\build\
 	)
 
 	echo :: HandmadeRalph.cpp
-	del HandmadeRalph_*.pdb
+	del HandmadeRalph_*.pdb > nul 2>&1
 	echo > LOCK.temp
 	clang -o HandmadeRalph.dll %DEBUG_COMPILER_FLAGS% W:\src\HandmadeRalph.cpp -shared -Xlinker /PDB:HandmadeRalph_%RANDOM%.pdb -Xlinker /export:PlatformUpdate -Xlinker /export:PlatformSound
-	del LOCK.temp
 	if !ERRORLEVEL! neq 0 (
 		echo :: HandmadeRalph compilation failed
+		del LOCK.temp
 		goto ABORT
 	)
+	del LOCK.temp
 
 	clang %DEBUG_COMPILER_FLAGS% -E -CC W:\src\HandmadeRalph_win32.cpp > HandmadeRalph_win32.new.cpp
 	fc /b HandmadeRalph_win32.new.cpp HandmadeRalph_win32.old.cpp > nul 2>&1
@@ -68,23 +69,10 @@ pushd W:\build\
 		) else (
 			move /y HandmadeRalph_win32.new.cpp HandmadeRalph_win32.old.cpp > nul
 		)
+	) else (
+		del HandmadeRalph_win32.new.cpp
 	)
 
 	:ABORT
 	del *.obj *.lib *.exp >nul 2> nul
-
-	set t=%time: =0%
-	set /a h=1%t0:~0,2%-100
-	set /a m=1%t0:~3,2%-100
-	set /a s=1%t0:~6,2%-100
-	set /a c=1%t0:~9,2%-100
-	set /a starttime = %h% * 360000 + %m% * 6000 + 100 * %s% + %c%
-	set /a h=1%t:~0,2%-100
-	set /a m=1%t:~3,2%-100
-	set /a s=1%t:~6,2%-100
-	set /a c=1%t:~9,2%-100
-	set /a endtime = %h% * 360000 + %m% * 6000 + 100 * %s% + %c%
-	set /a runtime = %endtime% - %starttime%
-	set runtime = %s%.%c%
-	echo :: %runtime%0ms
 popd W:\build\
