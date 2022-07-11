@@ -642,4 +642,14 @@ procedure constexpr String trim_whitespace(const String& str)
 	return ltrim_whitespace(rtrim_whitespace(str));
 }
 
+procedure constexpr bool32 is_char_at(const String& str, u64 index, char c)
+{
+	return index < str.size && str.data[index] == c;
+}
+
+procedure constexpr bool32 is_whitespace_at(const String& str, u64 index)
+{
+	return index < str.size && is_whitespace(str.data[index]);
+}
+
 #pragma clang diagnostic pop

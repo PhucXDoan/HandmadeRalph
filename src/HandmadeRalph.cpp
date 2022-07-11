@@ -2,7 +2,7 @@
 #include "platform.h"
 #include "rng.cpp"
 
-#define DEBUG_AUDIO 1
+#define DEBUG_AUDIO 0
 
 // @TODO@ Handle world chunk edges.
 
@@ -52,6 +52,16 @@ struct Shape
 	};
 };
 
+enum struct MonstarFlag : u8
+{
+	fast       = 1 << 0,
+	flying     = 1 << 1,
+	strong     = 1 << 2,
+	attractive = 1 << 3,
+};
+
+#include "META/flag/MonstarFlag.h"
+
 struct Chunk;
 
 struct EntityTree // @META@ Entity tree
@@ -86,14 +96,15 @@ struct EntityPet // @META@ Entity pet
 
 struct EntityMonstar // @META@ Entity monstar
 {
-	Chunk*   chunk;
-	vf3      rel_pos;
-	vf3      vel;
-	Shape    shape;
-	Cardinal cardinal;
-	i32      hp;
-	f32      hit_t;
-	f32      existence_t;
+	Chunk*      chunk;
+	vf3         rel_pos;
+	vf3         vel;
+	Shape       shape;
+	Cardinal    cardinal;
+	i32         hp;
+	f32         hit_t;
+	f32         existence_t;
+	MonstarFlag flag;
 };
 
 struct EntityRock // @META@ Entity rock
@@ -692,11 +703,20 @@ procedure void process_move(EntityPtr entity, State* state, f32 delta_time)
 			{
 				direction_to_monstar /= distance_to_monstar;
 
-				state->hero.vel.xy -= direction_to_monstar * 4.0f;
-				state->hero.vel.z  += 3.0f;
-
-				state->monstar.vel.xy += direction_to_monstar * 8.0f;
-				state->monstar.vel.z  += 8.0f;
+				if (+(state->monstar.flag & MonstarFlag::strong))
+				{
+					state->hero.vel.xy    -= direction_to_monstar * 8.0f;
+					state->hero.vel.z     += 6.0f;
+					state->monstar.vel.xy += direction_to_monstar * 10.0f;
+					state->monstar.vel.z  += 10.0f;
+				}
+				else
+				{
+					state->hero.vel.xy    -= direction_to_monstar * 4.0f;
+					state->hero.vel.z     += 3.0f;
+					state->monstar.vel.xy += direction_to_monstar * 8.0f;
+					state->monstar.vel.z  += 8.0f;
+				}
 			}
 		}
 
@@ -932,17 +952,6 @@ extern PlatformUpdate_t(PlatformUpdate)
 			};
 
 
-		state->monstar =
-			{
-				.chunk   = get_chunk(state, { 0, 0 }),
-				.rel_pos = { 9.0f, 4.0f, 0.0f },
-				.shape   =
-					{
-						.type   = ShapeType::circle,
-						.circle = { .radius = 0.3f }
-					}
-			};
-
 		state->pressure_plate =
 			{
 				.chunk   = get_chunk(state, { 0, 0 }),
@@ -1025,10 +1034,32 @@ extern PlatformUpdate_t(PlatformUpdate)
 			f32 distance_to_hero   = norm(ray_to_hero);
 			if (IN_RANGE(distance_to_hero, 0.1f, 10.0f))
 			{
-				target_monstar_vel = ray_to_hero / distance_to_hero * 4.0f;
+				target_monstar_vel = ray_to_hero / distance_to_hero * 2.0f;
+
+				if (+(state->monstar.flag & MonstarFlag::fast))
+				{
+					target_monstar_vel *= 2.0f;
+				}
 			}
-			state->monstar.vel.xy = dampen(state->monstar.vel.xy, target_monstar_vel, 0.4f, platform_delta_time);
-			state->monstar.vel.z  = dampen(state->monstar.vel.z, (2.0f - state->monstar.rel_pos.z) * 8.0f, 0.01f, platform_delta_time);
+
+			if (+(state->monstar.flag & MonstarFlag::attractive))
+			{
+				target_monstar_vel *= 6.0f;
+				state->monstar.vel.xy = dampen(state->monstar.vel.xy, target_monstar_vel, 0.8f, platform_delta_time);
+			}
+			else
+			{
+				state->monstar.vel.xy = dampen(state->monstar.vel.xy, target_monstar_vel, 0.4f, platform_delta_time);
+			}
+
+			if (+(state->monstar.flag & MonstarFlag::flying))
+			{
+				state->monstar.vel.z = dampen(state->monstar.vel.z, (2.0f - state->monstar.rel_pos.z) * 8.0f, 0.01f, platform_delta_time);
+			}
+			else
+			{
+				state->monstar.vel.z = dampen(state->monstar.vel.z, (0.5f - state->monstar.rel_pos.z) * 8.0f, 0.01f, platform_delta_time);
+			}
 		}
 		else
 		{
@@ -1058,8 +1089,26 @@ extern PlatformUpdate_t(PlatformUpdate)
 
 	if (state->pressure_plate.down && state->monstar.existence_t == 0.0f)
 	{
-		state->monstar.existence_t = 1.0f;
-		state->monstar.hp          = 2;
+		state->monstar =
+			{
+				.chunk   = get_chunk(state, { 0, 0 }),
+				.rel_pos = { 9.0f, 4.0f, 0.0f },
+				.shape   =
+					{
+						.type   = ShapeType::circle,
+						.circle = { .radius = 0.3f }
+					},
+				.hp          = 2,
+				.existence_t = 1.0f
+			};
+
+		FOR_ELEMS(META_MonstarFlag)
+		{
+			if (rng(&state->seed) < 0.5f)
+			{
+				state->monstar.flag |= it->flag;
+			}
+		}
 	}
 
 	//
@@ -1146,8 +1195,6 @@ extern PlatformUpdate_t(PlatformUpdate)
 		if      (state->camera_rel_pos.y <              0.0f) { state->camera_coords.y -= 1; state->camera_rel_pos.y += METERS_PER_CHUNK; }
 		else if (state->camera_rel_pos.y >= METERS_PER_CHUNK) { state->camera_coords.y += 1; state->camera_rel_pos.y -= METERS_PER_CHUNK; }
 	}
-
-	//DEBUG_printf("(%f %f)\n", PASS_V2(state->hero.rel_pos));
 
 	//
 	// Render.

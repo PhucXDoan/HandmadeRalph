@@ -65,7 +65,6 @@ pushd W:\build\
 			echo :: HandmadeRalph_win32 compilation failed
 			del HandmadeRalph_win32.new.cpp
 			del HandmadeRalph_win32.old.cpp
-			goto ABORT
 		) else (
 			move /y HandmadeRalph_win32.new.cpp HandmadeRalph_win32.old.cpp > nul
 		)

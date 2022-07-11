@@ -295,14 +295,14 @@ enum struct TokenType : u8
 	null,
 	meta,
 	preprocessor,
-	reserved,
+	special,
 	identifier,
 	number,
 	string,
 	character
 };
 
-enum struct ReservedType : u8
+enum struct SpecialType : u8
 {
 	null,
 
@@ -405,8 +405,8 @@ struct Token
 
 		struct
 		{
-			ReservedType type;
-		} reserved;
+			SpecialType type;
+		} special;
 	};
 };
 
@@ -523,7 +523,7 @@ procedure Tokenizer init_tokenizer(String file_path, MemoryArena* arena)
 			token.type = TokenType::preprocessor;
 
 			bool32 escaped = false;
-			while (peek_read(0) && IMPLIES(!escaped, peek_read(0) != '\n'))
+			while (peek_read(0) && IMPLIES(!escaped, peek_read(0) != '\n') && IMPLIES(peek_read(0) == '/', peek_read(1) != '/' && peek_read(1) != '*'))
 			{
 				if (peek_read(0) == '\\')
 				{
@@ -551,8 +551,8 @@ procedure Tokenizer init_tokenizer(String file_path, MemoryArena* arena)
 			{
 				if (*it == token.text)
 				{
-					token.type          = TokenType::reserved;
-					token.reserved.type = static_cast<ReservedType>(static_cast<i32>(ReservedType::MULTIBYTE_START) + it_index);
+					token.type         = TokenType::special;
+					token.special.type = static_cast<SpecialType>(static_cast<i32>(SpecialType::MULTIBYTE_START) + it_index);
 					break;
 				}
 			}
@@ -611,19 +611,19 @@ procedure Tokenizer init_tokenizer(String file_path, MemoryArena* arena)
 		}
 		else
 		{
-			token.type = TokenType::reserved;
+			token.type = TokenType::special;
 
 			FOR_ELEMS(RESERVED_STRINGS)
 			{
 				if (curr_read + it->size <= tokenizer.file_data + tokenizer.file_size && String { it->size, curr_read } == *it)
 				{
-					token.reserved.type = static_cast<ReservedType>(static_cast<i32>(ReservedType::MULTIBYTE_START) + it_index);
+					token.special.type = static_cast<SpecialType>(static_cast<i32>(SpecialType::MULTIBYTE_START) + it_index);
 					inc(it->size);
 					goto BREAK;
 				}
 			}
 			{
-				token.reserved.type = static_cast<ReservedType>(peek_read(0));
+				token.special.type = static_cast<SpecialType>(peek_read(0));
 				inc(1);
 			}
 			BREAK:;
@@ -649,14 +649,14 @@ procedure Tokenizer init_tokenizer(String file_path, MemoryArena* arena)
 	return tokenizer;
 }
 
-procedure bool32 is_reserved(Token token, ReservedType type)
+procedure bool32 is_special(Token token, SpecialType type)
 {
-	return token.type == TokenType::reserved && token.reserved.type == type;
+	return token.type == TokenType::special && token.special.type == type;
 }
 
-procedure bool32 is_reserved(Token token, char type)
+procedure bool32 is_special(Token token, char type)
 {
-	return token.type == TokenType::reserved && token.reserved.type == static_cast<ReservedType>(type);
+	return token.type == TokenType::special && token.special.type == static_cast<SpecialType>(type);
 }
 
 procedure Token shift(Tokenizer* tokenizer, i32 offset)
@@ -804,8 +804,9 @@ struct AST
 
 		struct
 		{
-			AST*   underlying_type;
-			String name;
+			AST*       underlying_type;
+			String     name;
+			TokenNode* assignment;
 		} declaration;
 	};
 };
@@ -820,12 +821,16 @@ procedure AST* init_ast(Tokenizer* tokenizer, MemoryArena* arena)
 {
 	Token token = shift(tokenizer, 0);
 
-	if (is_reserved(token, ReservedType::a_enum))
+	if (is_special(token, SpecialType::a_enum))
 	{
 		AST* ast = allocate<AST>(arena);
 		*ast = { .type = ASTType::a_enum };
 
 		token = shift(tokenizer, 1);
+		if (is_special(token, SpecialType::a_struct))
+		{
+			token = shift(tokenizer, 1);
+		}
 		if (token.type != TokenType::identifier)
 		{
 			report(String("Expected an identifier for the enum name."), tokenizer);
@@ -835,7 +840,7 @@ procedure AST* init_ast(Tokenizer* tokenizer, MemoryArena* arena)
 		ast->a_enum.name = token.text;
 
 		token = shift(tokenizer, 1); // @TODO@ Inferred underlying type.
-		if (!is_reserved(token, ':'))
+		if (!is_special(token, ':'))
 		{
 			report(String("Expected a colon to denote underlying type."), tokenizer);
 			return {};
@@ -861,7 +866,7 @@ procedure AST* init_ast(Tokenizer* tokenizer, MemoryArena* arena)
 			ast->meta = token.meta.info;
 			token     = shift(tokenizer, 1);
 		}
-		if (!is_reserved(token, '{'))
+		if (!is_special(token, '{'))
 		{
 			report(String("Expected an opening curly brace."), tokenizer);
 			return {};
@@ -872,7 +877,7 @@ procedure AST* init_ast(Tokenizer* tokenizer, MemoryArena* arena)
 		while (true)
 		{
 			token = shift(tokenizer, 0);
-			if (is_reserved(token, '}'))
+			if (is_special(token, '}'))
 			{
 				break;
 			}
@@ -887,7 +892,36 @@ procedure AST* init_ast(Tokenizer* tokenizer, MemoryArena* arena)
 					};
 
 				token = shift(tokenizer, 1);
-				if (is_reserved(token, ','))
+				if (is_special(token, '='))
+				{
+					token = shift(tokenizer, 1);
+					TokenNode** token_nil = &(*nil)->ast->declaration.assignment;
+					while (true)
+					{
+						if (token.type == TokenType::null)
+						{
+							return {};
+						}
+						else if (is_special(token, ','))
+						{
+							token = shift(tokenizer, 1);
+							break;
+						}
+						else if (is_special(token, '}'))
+						{
+							break;
+						}
+						else
+						{
+							*token_nil  = allocate<TokenNode>(arena);
+							**token_nil = { .token = token };
+							token_nil   = &(*token_nil)->next;
+						}
+						token = shift(tokenizer, 1);
+					}
+				}
+
+				if (is_special(token, ','))
 				{
 					token = shift(tokenizer, 1);
 				}
@@ -901,13 +935,13 @@ procedure AST* init_ast(Tokenizer* tokenizer, MemoryArena* arena)
 			}
 			else
 			{
-				report(String("Expected an identifier for enum member."), tokenizer);
+				report(String("Unexpected token."), tokenizer);
 				return {};
 			}
 		}
 
 		token = shift(tokenizer, 1);
-		if (!is_reserved(token, ';'))
+		if (!is_special(token, ';'))
 		{
 			report(String("Expected semicolon."), tokenizer);
 			return {};
@@ -917,7 +951,7 @@ procedure AST* init_ast(Tokenizer* tokenizer, MemoryArena* arena)
 
 		return ast;
 	}
-	else if (is_reserved(token, ReservedType::a_struct) || is_reserved(token, ReservedType::a_union))
+	else if (is_special(token, SpecialType::a_struct) || is_special(token, SpecialType::a_union))
 	{
 		AST* ast = allocate<AST>(arena);
 		*ast =
@@ -926,7 +960,7 @@ procedure AST* init_ast(Tokenizer* tokenizer, MemoryArena* arena)
 				.type_container =
 					{
 						.type =
-							is_reserved(token, ReservedType::a_struct)
+							is_special(token, SpecialType::a_struct)
 								? TypeContainerType::a_struct
 								: TypeContainerType::a_union
 					}
@@ -941,14 +975,14 @@ procedure AST* init_ast(Tokenizer* tokenizer, MemoryArena* arena)
 			token = shift(tokenizer, 1);
 		}
 
-		if (!is_reserved(token, '{'))
+		if (!is_special(token, '{'))
 		{
 			report(String("Expected `{`."), tokenizer);
 			return {};
 		}
 
 		ASTNode** nil = &ast->type_container.declarations;
-		for (token = shift(tokenizer, 1); !is_reserved(token, '}'); token = shift(tokenizer, 0))
+		for (token = shift(tokenizer, 1); !is_special(token, '}'); token = shift(tokenizer, 0))
 		{
 			AST* sub_ast = init_ast(tokenizer, arena);
 			if (sub_ast)
@@ -986,7 +1020,7 @@ procedure AST* init_ast(Tokenizer* tokenizer, MemoryArena* arena)
 			ast   = declaration;
 			token = shift(tokenizer, 1);
 		}
-		if (!is_reserved(token, ';'))
+		if (!is_special(token, ';'))
 		{
 			report(String("Expected semicolon."), tokenizer);
 			return {};
@@ -1028,7 +1062,7 @@ procedure AST* init_ast(Tokenizer* tokenizer, MemoryArena* arena)
 		ast->declaration.name = token.text;
 
 		token = shift(tokenizer, 1);
-		if (is_reserved(token, '['))
+		if (is_special(token, '['))
 		{
 			{
 				AST* array = allocate<AST>(arena);
@@ -1041,7 +1075,7 @@ procedure AST* init_ast(Tokenizer* tokenizer, MemoryArena* arena)
 			}
 
 			TokenNode** nil = &ast->declaration.underlying_type->type_array.capacity;
-			for (token = shift(tokenizer, 1); !is_reserved(token, ']'); token = shift(tokenizer, 1))
+			for (token = shift(tokenizer, 1); !is_special(token, ']'); token = shift(tokenizer, 1))
 			{
 				TokenNode* node = allocate<TokenNode>(arena);
 				*node = { .token = token };
@@ -1050,7 +1084,7 @@ procedure AST* init_ast(Tokenizer* tokenizer, MemoryArena* arena)
 			}
 			token = shift(tokenizer, 1);
 		}
-		if (!is_reserved(token, ';'))
+		if (!is_special(token, ';'))
 		{
 			report(String("Expected semicolon."), tokenizer);
 			return {};
@@ -1070,6 +1104,19 @@ procedure AST* init_ast(Tokenizer* tokenizer, MemoryArena* arena)
 		report(String("Unknown handling of token."), tokenizer);
 		return {};
 	}
+}
+
+procedure bool32 is_valid_identifier(String str)
+{
+	FOR_STR(str)
+	{
+		if (*it != '_' && !is_alpha(*it) && IMPLIES(is_digit(*it), it_index == 0))
+		{
+			return false;
+		}
+	}
+
+	return true;
 }
 
 int main()
@@ -1163,7 +1210,7 @@ int main()
 					{
 						meta_token = shift(&meta_tokenizer, -1);
 
-						if (is_reserved(meta_token, ReservedType::a_enum))
+						if (is_special(meta_token, SpecialType::a_enum))
 						{
 							meta_token = shift(&meta_tokenizer, 1);
 							if (meta_token.type == TokenType::identifier && meta_token.text == String("Cardinal"))
@@ -1196,7 +1243,7 @@ int main()
 
 					StringBuilder* meta_builder = init_string_builder(&main_arena);
 
-					append(meta_builder, String("global inline constexpr struct META_"));
+					append(meta_builder, String("global constexpr struct META_"));
 					append(meta_builder, ast->a_enum.name);
 					append(meta_builder, String("_t { "));
 					append(meta_builder, ast->a_enum.name);
@@ -1270,14 +1317,14 @@ int main()
 					Token     meta_token     = shift(&meta_tokenizer, 0);
 
 					meta_token = shift(&meta_tokenizer, -1);
-					if (!is_reserved(meta_token, ';'))
+					if (!is_special(meta_token, ';'))
 					{
 						report(String("Expected semicolon to denote the end of a union declaration."), &meta_tokenizer);
 						return 1;
 					}
 
 					meta_token = shift(&meta_tokenizer, -1);
-					if (!is_reserved(meta_token, '}'))
+					if (!is_special(meta_token, '}'))
 					{
 						report(String("Expected a closing curly brace to denote the end of a union declaration."), &meta_tokenizer);
 						return 1;
@@ -1289,16 +1336,16 @@ int main()
 
 						if (meta_token.type == TokenType::null)
 						{
-							report(String("Failed to find the corresponding union for the meta oepration."), &main_tokenizer);
+							report(String("Failed to find the corresponding union for the meta operation."), &main_tokenizer);
 							return 1;
 						}
-						else if (is_reserved(meta_token, '{'))
+						else if (is_special(meta_token, '{'))
 						{
 							depth -= 1;
 							if (depth == 0)
 							{
 								meta_token = shift(&meta_tokenizer, -1);
-								if (!is_reserved(meta_token, ReservedType::a_union))
+								if (!is_special(meta_token, SpecialType::a_union))
 								{
 									report(String("Expected keyword `union` here."), &meta_tokenizer);
 									report(String("Failed to do meta operation."), &main_tokenizer);
@@ -1306,7 +1353,7 @@ int main()
 								}
 							}
 						}
-						else if (is_reserved(meta_token, '}'))
+						else if (is_special(meta_token, '}'))
 						{
 							depth += 1;
 						}
@@ -1332,7 +1379,7 @@ int main()
 					StringBuilder* meta_builder  = init_string_builder(&main_arena);
 					StringBuilder* defer_builder = init_string_builder(&main_arena);
 
-					append(meta_builder, String("global inline constexpr String META_"));
+					append(meta_builder, String("global constexpr String META_"));
 					append(meta_builder, file_name);
 					append(meta_builder, String("[] =\n\t{\n"));
 
@@ -1368,9 +1415,13 @@ int main()
 							append(meta_builder, asset_path);
 							append(meta_builder, String("\")"));
 
-							if (remaining.size || declaration->next)
+							if (remaining.size)
 							{
 								append(meta_builder, String(", "));
+							}
+							else if (declaration->next)
+							{
+								append(meta_builder, String(","));
 							}
 						}
 						append(meta_builder , String("\n"));
@@ -1427,14 +1478,11 @@ int main()
 								continue;
 							}
 							semantic_name = trim_whitespace(semantic_name);
-							FOR_STR(semantic_name)
+							if (!is_valid_identifier(semantic_name))
 							{
-								if (*it != '_' && !is_alpha(*it) && IMPLIES(is_digit(*it), it_index == 0))
-								{
-									report(String("Invalid identifier."), &meta_tokenizer);
-									report(String("Failed to do meta operation."), &main_tokenizer);
-									return 1;
-								}
+								report(String("Invalid identifier."), &meta_tokenizer);
+								report(String("Failed to do meta operation."), &main_tokenizer);
+								return 1;
 							}
 
 							meta_token = shift(&meta_tokenizer, -1);
@@ -1448,7 +1496,7 @@ int main()
 							String container_name = meta_token.text;
 
 							meta_token = shift(&meta_tokenizer, -1);
-							if (!is_reserved(meta_token, ReservedType::a_struct))
+							if (!is_special(meta_token, SpecialType::a_struct))
 							{
 								report(String("Expected `struct`."), &meta_tokenizer);
 								report(String("Failed to do meta operation."), &main_tokenizer);
@@ -1518,6 +1566,107 @@ int main()
 
 					if (!write(flush(meta_builder), meta_data))
 					{
+						DEBUG_HALT();
+						report(String("Failed to write meta data to file."), &main_tokenizer);
+						return 1;
+					}
+				}
+				else if (meta_operation == String("flag"))
+				{
+					Tokenizer meta_tokenizer = main_tokenizer;
+					Token     meta_token = shift(&meta_tokenizer, -1);
+
+					while (true)
+					{
+						if (meta_token.type == TokenType::null)
+						{
+							report(String("Failed to find the corresponding enum for the meta operation."), &main_tokenizer);
+							return 1;
+						}
+						else if (meta_token.type == TokenType::identifier && meta_token.text == file_name)
+						{
+							meta_token = shift(&meta_tokenizer, -1);
+							if (is_special(meta_token, SpecialType::a_struct))
+							{
+								meta_token = shift(&meta_tokenizer, -1);
+							}
+							if (is_special(meta_token, SpecialType::a_enum))
+							{
+								break;
+							}
+						}
+
+						meta_token = shift(&meta_tokenizer, -1);
+					}
+
+					AST* ast = init_ast(&meta_tokenizer, &main_arena);
+					if (!ast)
+					{
+						report(String("Failed to parse the AST for the meta operation."), &main_tokenizer);
+						return 1;
+					}
+
+					ASSERT(ast->type == ASTType::a_enum);
+					ASSERT(ast->a_enum.underlying_type->type == ASTType::type_atom);
+
+					StringBuilder* meta_builder  = init_string_builder(&main_arena);
+
+					append(meta_builder, String("#pragma clang diagnostic push\n#pragma clang diagnostic ignored \"-Wunused-function\"\n"));
+
+					#define PASS_TYPE PASS_ISTR(ast->a_enum.underlying_type->type_atom.name)
+					#define PASS_NAME PASS_ISTR(file_name)
+					appendf(meta_builder, "procedure constexpr %.*s operator+ (const %.*s& a) { return static_cast<%.*s>(a); }\n", PASS_TYPE, PASS_NAME, PASS_TYPE);
+					appendf(meta_builder, "procedure constexpr %.*s operator~ (const %.*s& a) { return static_cast<%.*s>(~static_cast<%.*s>(a)); }\n", PASS_NAME, PASS_NAME, PASS_NAME, PASS_TYPE);
+
+					appendf(meta_builder, "procedure constexpr %.*s operator&  (const %.*s& a, const %.*s& b) { return     static_cast<%.*s>(static_cast<%.*s>(a) & static_cast<%.*s>(b)); }\n", PASS_NAME, PASS_NAME, PASS_NAME, PASS_NAME, PASS_TYPE, PASS_TYPE);
+					appendf(meta_builder, "procedure constexpr %.*s operator|  (const %.*s& a, const %.*s& b) { return     static_cast<%.*s>(static_cast<%.*s>(a) | static_cast<%.*s>(b)); }\n", PASS_NAME, PASS_NAME, PASS_NAME, PASS_NAME, PASS_TYPE, PASS_TYPE);
+					appendf(meta_builder, "procedure constexpr %.*s operator^  (const %.*s& a, const %.*s& b) { return     static_cast<%.*s>(static_cast<%.*s>(a) ^ static_cast<%.*s>(b)); }\n", PASS_NAME, PASS_NAME, PASS_NAME, PASS_NAME, PASS_TYPE, PASS_TYPE);
+					appendf(meta_builder, "procedure constexpr %.*s operator&= (      %.*s& a, const %.*s& b) { return a = static_cast<%.*s>(static_cast<%.*s>(a) & static_cast<%.*s>(b)); }\n", PASS_NAME, PASS_NAME, PASS_NAME, PASS_NAME, PASS_TYPE, PASS_TYPE);
+					appendf(meta_builder, "procedure constexpr %.*s operator|= (      %.*s& a, const %.*s& b) { return a = static_cast<%.*s>(static_cast<%.*s>(a) | static_cast<%.*s>(b)); }\n", PASS_NAME, PASS_NAME, PASS_NAME, PASS_NAME, PASS_TYPE, PASS_TYPE);
+					appendf(meta_builder, "procedure constexpr %.*s operator^= (      %.*s& a, const %.*s& b) { return a = static_cast<%.*s>(static_cast<%.*s>(a) ^ static_cast<%.*s>(b)); }\n", PASS_NAME, PASS_NAME, PASS_NAME, PASS_NAME, PASS_TYPE, PASS_TYPE);
+
+					appendf(meta_builder, "procedure constexpr %.*s operator<< (const %.*s& a, const %.*s n) { return     static_cast<%.*s>(static_cast<%.*s>(a) << n); }\n", PASS_NAME, PASS_NAME, PASS_TYPE, PASS_NAME);
+					appendf(meta_builder, "procedure constexpr %.*s operator>> (const %.*s& a, const %.*s n) { return     static_cast<%.*s>(static_cast<%.*s>(a) >> n); }\n", PASS_NAME, PASS_NAME, PASS_TYPE, PASS_NAME);
+					appendf(meta_builder, "procedure constexpr %.*s operator<<=(      %.*s& a, const %.*s n) { return a = static_cast<%.*s>(static_cast<%.*s>(a) << n); }\n", PASS_NAME, PASS_NAME, PASS_TYPE, PASS_NAME);
+					appendf(meta_builder, "procedure constexpr %.*s operator>>=(      %.*s& a, const %.*s n) { return a = static_cast<%.*s>(static_cast<%.*s>(a) >> n); }\n", PASS_NAME, PASS_NAME, PASS_TYPE, PASS_NAME);
+
+					appendf(meta_builder, "global constexpr struct META_%.*s_t { %.*s flag; %.*s value; union { String str; struct { byte PADDING_[offsetof(String, data)]; strlit cstr; }; }; } META_%.*s[] =\n", PASS_NAME, PASS_NAME, PASS_TYPE, PASS_NAME);
+					appendf(meta_builder, "\t{\n");
+
+					bool32 reported_implicit_member = false;
+					FOR_NODES(ast->a_enum.members)
+					{
+						#define PASS_MEMBER PASS_ISTR(it->ast->declaration.name)
+						if (!reported_implicit_member && !it->ast->declaration.assignment)
+						{
+							reported_implicit_member = true;
+							printf(":: WaRNING : Flag member (%.*s::%.*s) has implicit assignment.\n", PASS_NAME, PASS_MEMBER);
+							report(String("Warning from this meta operation."), &main_tokenizer);
+						}
+
+						ASSERT(it->ast->type == ASTType::declaration);
+						appendf(meta_builder, "\t\t{ %.*s::%.*s, static_cast<%.*s>(%.*s::%.*s), String(\"%.*s\") }", PASS_NAME, PASS_MEMBER, PASS_TYPE, PASS_NAME, PASS_MEMBER, PASS_MEMBER);
+						if (it->next)
+						{
+							appendf(meta_builder, ",");
+						}
+						appendf(meta_builder, "\n");
+						#undef PASS_MEMBER
+					}
+
+					appendf(meta_builder, "\t};\n");
+					#undef PASS_TYPE
+					#undef PASS_NAME
+
+					append(meta_builder, String("#pragma clang diagnostic pop\n"));
+
+					String meta_data = flush(meta_builder);
+					append(meta_builder, String(SRC_DIR));
+					append(meta_builder, file_path);
+
+					if (!write(flush(meta_builder), meta_data))
+					{
+						DEBUG_HALT();
 						report(String("Failed to write meta data to file."), &main_tokenizer);
 						return 1;
 					}
