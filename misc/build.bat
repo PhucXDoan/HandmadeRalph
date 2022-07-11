@@ -10,7 +10,7 @@ set COMMON_COMPILER_FLAGS=^
 	-Wno-deprecated-copy-with-user-provided-dtor -Wno-missing-braces   -Wno-gnu-anonymous-struct -Wno-nested-anon-types     -Wno-cast-function-type                -Wno-disabled-macro-expansion^
 	-Wno-switch-enum -Wno-zero-as-null-pointer-constant
 
-set DEBUG_COMPILER_FLAGS=%COMMON_COMPILER_FLAGS% -O0 -g -gcodeview -DDEBUG=1 -Wno-unused-parameter -Wno-unused-command-line-argument -Wno-unused-function -Wno-unused-variable -Wno-unused-macros
+set DEBUG_COMPILER_FLAGS=%COMMON_COMPILER_FLAGS% -O0 -g -gcodeview -DDEBUG=1 -Wno-unused-parameter -Wno-unused-command-line-argument -Wno-unused-function -Wno-unused-variable -Wno-unused-macros -Wno-unused-template
 
 if not exist W:\build\ (
 	mkdir W:\build\
@@ -28,14 +28,14 @@ pushd W:\build\
 		clang -o metaprogram.exe %DEBUG_COMPILER_FLAGS% -Werror W:\src\metaprogram.cpp -l shell32.lib
 		if !ERRORLEVEL! neq 0 (
 			echo :: Metaprogram compilation failed
-			del metaprogram.new.cpp
-			del metaprogram.old.cpp
+			del metaprogram.new.cpp > nul 2>&1
+			del metaprogram.old.cpp > nul 2>&1
 			goto ABORT
 		) else (
 			move /y metaprogram.new.cpp metaprogram.old.cpp > nul
 		)
 	) else (
-		del metaprogram.new.cpp
+		del metaprogram.new.cpp > nul 2>&1
 	)
 
 	echo :: metaprogram.exe
@@ -63,15 +63,15 @@ pushd W:\build\
 		clang -o HandmadeRalph.exe %DEBUG_COMPILER_FLAGS% W:\src\HandmadeRalph_win32.cpp -l user32.lib -l gdi32.lib -l winmm.lib -l dxgi.lib -Xlinker /subsystem:windows
 		if !ERRORLEVEL! neq 0 (
 			echo :: HandmadeRalph_win32 compilation failed
-			del HandmadeRalph_win32.new.cpp
-			del HandmadeRalph_win32.old.cpp
+			del HandmadeRalph_win32.new.cpp > nul 2>&1
+			del HandmadeRalph_win32.old.cpp > nul 2>&1
 		) else (
 			move /y HandmadeRalph_win32.new.cpp HandmadeRalph_win32.old.cpp > nul
 		)
 	) else (
-		del HandmadeRalph_win32.new.cpp
+		del HandmadeRalph_win32.new.cpp > nul 2>&1
 	)
 
 	:ABORT
-	del *.obj *.lib *.exp >nul 2> nul
+	del *.obj *.lib *.exp > nul 2>&1
 popd W:\build\

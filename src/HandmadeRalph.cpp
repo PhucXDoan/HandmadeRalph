@@ -22,35 +22,22 @@ enum Cardinal : u8 // @META@ vf2 vf; vi2 vi;
 	Cardinal_left,  // @META@ { -1.0f,  0.0f }, { -1,  0 }
 	Cardinal_right, // @META@ {  1.0f,  0.0f }, {  1,  0 }
 	Cardinal_down,  // @META@ {  0.0f, -1.0f }, {  0, -1 }
-	Cardinal_up     // @META@ {  0.0f,  1.0f }, {  0,  1 }
+	Cardinal_up,    // @META@ {  0.0f,  1.0f }, {  0,  1 }
 };
 #include "META/enum/Cardinal.h"
 
-// @TODO@ Add the other shapes.
-enum struct ShapeType : u8
+struct ShapeCircle // @META@ Shape circle
 {
-	null,
-	circle,
-	rounded_rectangle
+	f32 radius;
 };
 
-struct Shape
+struct ShapeRoundedRectangle // @META@ Shape rounded_rectangle
 {
-	ShapeType type;
-	union
-	{
-		struct
-		{
-			f32 radius;
-		} circle;
-
-		struct
-		{
-			vf2 dims;
-			f32 padding;
-		} rounded_rectangle;
-	};
+	vf2 dims;
+	f32 padding;
 };
+
+#include "META/variant/Shape.h"
 
 enum struct MonstarFlag : u8
 {
@@ -59,7 +46,6 @@ enum struct MonstarFlag : u8
 	strong     = 1 << 2,
 	attractive = 1 << 3,
 };
-
 #include "META/flag/MonstarFlag.h"
 
 struct Chunk;
