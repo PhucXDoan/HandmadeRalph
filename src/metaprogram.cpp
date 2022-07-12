@@ -56,6 +56,7 @@ procedure FilePathsInResult file_paths_in(String dir_path, MemoryArena* arena)
 	wide_dir_path[wide_dir_path_count] = L'\0';
 
 	StringNode* file_names = 0;
+
 	while (true)
 	{
 		BOOL status = FindNextFileW(handle, &find_data);
@@ -953,6 +954,8 @@ procedure bool32 parse_enumerator(MetaTypeEnumerator* enumerator, Tokenizer* tok
 procedure bool32 parse_declaration(MetaDeclaration* declaration, Tokenizer* tokenizer, MemoryArena* arena);
 procedure bool32 parse_container(MetaTypeContainer* container, Tokenizer* tokenizer, MemoryArena* arena)
 {
+	*container = {};
+
 	Token token = shift(tokenizer, 0);
 
 	if (is_reserved_symbol(token, ReservedSymbolType::a_struct))
@@ -1125,6 +1128,52 @@ procedure bool32 is_valid_identifier(String str)
 	return true;
 }
 
+procedure bool32 parse_include_meta(String* file_path, String* file_name, String* file_extension, String* meta_operation, String include_directive)
+{
+	*file_path = include_directive;
+	if (!file_path->size || file_path->data[0] != '#')
+	{
+		return false;
+	}
+
+	*file_path = ltrim_whitespace(ltrim(*file_path, 1));
+
+	if (!starts_with(*file_path, String("include")))
+	{
+		return false;
+	}
+
+	*file_path = trim(ltrim_whitespace(ltrim(*file_path, String("include").size)), 1, 1);
+
+	if (!starts_with(*file_path, String("META/")))
+	{
+		return false;
+	}
+
+	*meta_operation     = ltrim(*file_path, String("META/").size);
+	*file_name          = *meta_operation;
+	FOR_STR(*meta_operation)
+	{
+		if (*it == '/')
+		{
+			meta_operation->size = it_index;
+			*file_name           = ltrim(*file_name, it_index + 1);
+			break;
+		}
+	}
+	FOR_STR(*file_name)
+	{
+		if (*it == '.')
+		{
+			*file_extension = ltrim(*file_name, it_index);
+			file_name->size = it_index;
+			break;
+		}
+	}
+
+	return true;
+}
+
 int main()
 {
 	//DEFER { DEBUG_STDOUT_HALT(); };
@@ -1166,503 +1215,527 @@ int main()
 
 		for (Token main_token = shift(&main_tokenizer, 0); main_token.type != TokenType::null; main_token = shift(&main_tokenizer, 1))
 		{
-			if (main_token.type == TokenType::preprocessor)
+			String file_path;
+			String file_name;
+			String file_extension;
+			String meta_operation;
+			if (!parse_include_meta(&file_path, &file_name, &file_extension, &meta_operation, main_token.text))
 			{
-				String file_path = main_token.text;
-				ASSERT(file_path.size && file_path.data[0] == '#');
+				continue;
+			}
 
-				file_path = ltrim_whitespace(ltrim(file_path, 1));
+			DEFER_ARENA_RESET(&main_arena);
 
-				if (!starts_with(file_path, String("include")))
+			if (meta_operation == String("enum"))
+			{
+				Tokenizer meta_tokenizer = main_tokenizer;
+				Token     meta_token     = shift(&meta_tokenizer, 0);
+
+				while (true)
 				{
-					continue;
-				}
+					meta_token = shift(&meta_tokenizer, -1);
 
-				file_path = trim(ltrim_whitespace(ltrim(file_path, String("include").size)), 1, 1);
-
-				if (!starts_with(file_path, String("META/")))
-				{
-					continue;
-				}
-
-				String meta_operation = ltrim(file_path, String("META/").size);
-				String file_name      = meta_operation;
-				FOR_STR(meta_operation)
-				{
-					if (*it == '/')
+					if (is_reserved_symbol(meta_token, ReservedSymbolType::a_enum))
 					{
-						meta_operation.size = it_index;
-						file_name           = ltrim(file_name, it_index + 1);
-						break;
-					}
-				}
-				FOR_STR(file_name)
-				{
-					if (*it == '.')
-					{
-						file_name.size = it_index;
-						break;
-					}
-				}
-
-				DEFER_ARENA_RESET(&main_arena);
-
-				if (meta_operation == String("enum"))
-				{
-					Tokenizer meta_tokenizer = main_tokenizer;
-					Token     meta_token     = shift(&meta_tokenizer, 0);
-
-					while (true)
-					{
-						meta_token = shift(&meta_tokenizer, -1);
-
-						if (is_reserved_symbol(meta_token, ReservedSymbolType::a_enum))
+						meta_token = shift(&meta_tokenizer, 1);
+						if (meta_token.type == TokenType::identifier && meta_token.text == String("Cardinal"))
 						{
-							meta_token = shift(&meta_tokenizer, 1);
-							if (meta_token.type == TokenType::identifier && meta_token.text == String("Cardinal"))
-							{
-								meta_token = shift(&meta_tokenizer, -1);
-								break;
-							}
-							else
-							{
-								meta_token = shift(&meta_tokenizer, -1);
-							}
+							meta_token = shift(&meta_tokenizer, -1);
+							break;
 						}
-
-						if (meta_token.type == TokenType::null)
+						else
 						{
-							report(String("Failed to find enum declaration."), &main_tokenizer);
-							return 1;
+							meta_token = shift(&meta_tokenizer, -1);
 						}
 					}
 
-					MetaTypeEnumerator enumerator;
-					if (!parse_enumerator(&enumerator, &meta_tokenizer, &main_arena))
+					if (meta_token.type == TokenType::null)
 					{
-						report(String("Failed to parse enumerator for meta operation."), &main_tokenizer);
+						report(String("Failed to find enum declaration."), &main_tokenizer);
 						return 1;
 					}
+				}
 
-					StringBuilder* meta_builder = init_string_builder(&main_arena);
+				MetaTypeEnumerator enumerator;
+				if (!parse_enumerator(&enumerator, &meta_tokenizer, &main_arena))
+				{
+					report(String("Failed to parse enumerator for meta operation."), &main_tokenizer);
+					return 1;
+				}
 
+				StringBuilder* meta_builder = init_string_builder(&main_arena);
+
+				appendf
+				(
+					meta_builder,
+					"global constexpr struct META_%.*s_t { %.*s enumerator; %.*s value; union { String str; struct { byte PADDING_[offsetof(String, data)]; strlit cstr; }; }; ",
+					PASS_ISTR(enumerator.name), PASS_ISTR(enumerator.name), PASS_ISTR(enumerator.underlying_type.name)
+				);
+
+				if (+enumerator.meta)
+				{
+					appendf(meta_builder, "%.*s ", PASS_ISTR(enumerator.meta));
+				}
+
+				appendf(meta_builder, "} META_%.*s[] =\n\t{\n", PASS_ISTR(enumerator.name));
+
+				FOR_NODES(enumerator.members)
+				{
 					appendf
 					(
 						meta_builder,
-						"global constexpr struct META_%.*s_t { %.*s enumerator; %.*s value; union { String str; struct { byte PADDING_[offsetof(String, data)]; strlit cstr; }; }; ",
-						PASS_ISTR(enumerator.name), PASS_ISTR(enumerator.name), PASS_ISTR(enumerator.underlying_type.name)
+						"\t\t{ %.*s::%.*s, static_cast<%.*s>(%.*s::%.*s), String(\"%.*s\") ",
+						PASS_ISTR(enumerator.name),
+						PASS_ISTR(it->name),
+						PASS_ISTR(enumerator.underlying_type.name),
+						PASS_ISTR(enumerator.name),
+						PASS_ISTR(it->name),
+						PASS_ISTR(it->name)
 					);
 
-					if (+enumerator.meta)
+					if (+it->meta)
 					{
-						appendf(meta_builder, "%.*s ", PASS_ISTR(enumerator.meta));
-					}
-
-					appendf(meta_builder, "} META_%.*s[] =\n\t{\n", PASS_ISTR(enumerator.name));
-
-					FOR_NODES(enumerator.members)
-					{
-						appendf
-						(
-							meta_builder,
-							"\t\t{ %.*s::%.*s, static_cast<%.*s>(%.*s::%.*s), String(\"%.*s\") ",
-							PASS_ISTR(enumerator.name),
-							PASS_ISTR(it->name),
-							PASS_ISTR(enumerator.underlying_type.name),
-							PASS_ISTR(enumerator.name),
-							PASS_ISTR(it->name),
-							PASS_ISTR(it->name)
-						);
-
-						if (+it->meta)
+						if (+enumerator.meta)
 						{
-							if (+enumerator.meta)
-							{
-								appendf(meta_builder, ", %.*s", PASS_ISTR(it->meta));
-							}
-							else
-							{
-								report(String("A member has a meta tag when the enumerator declaration does not."), &main_tokenizer);
-								return 1;
-							}
+							appendf(meta_builder, ", %.*s", PASS_ISTR(it->meta));
 						}
-
-						appendf(meta_builder, " }");
-						if (it->next)
+						else
 						{
-							appendf(meta_builder, ",");
+							report(String("A member has a meta tag when the enumerator declaration does not."), &main_tokenizer);
+							return 1;
 						}
-						appendf(meta_builder, "\n");
 					}
 
-					appendf(meta_builder, "\t};\n");
-					String meta_data = flush(meta_builder);
-
-					appendf(meta_builder, SRC_DIR);
-					append(meta_builder, file_path);
-
-					if (!write(flush(meta_builder), meta_data))
+					appendf(meta_builder, " }");
+					if (it->next)
 					{
-						report(String("Failed to write meta data to file."), &main_tokenizer);
-						return 1;
+						appendf(meta_builder, ",");
 					}
+					appendf(meta_builder, "\n");
 				}
-				else if (meta_operation == String("asset"))
-				{
-					Tokenizer meta_tokenizer = main_tokenizer;
-					Token     meta_token     = shift(&meta_tokenizer, 0);
 
+				appendf(meta_builder, "\t};\n");
+				String meta_data = flush(meta_builder);
+
+				appendf(meta_builder, SRC_DIR);
+				append(meta_builder, file_path);
+
+				if (!write(flush(meta_builder), meta_data))
+				{
+					report(String("Failed to write meta data to file."), &main_tokenizer);
+					return 1;
+				}
+			}
+			else if (meta_operation == String("asset"))
+			{
+				Tokenizer meta_tokenizer = main_tokenizer;
+				Token     meta_token     = shift(&meta_tokenizer, 0);
+
+				meta_token = shift(&meta_tokenizer, -1);
+				if (!is_reserved_symbol(meta_token, ';'))
+				{
+					report(String("Expected semicolon to denote the end of a union declaration."), &meta_tokenizer);
+					return 1;
+				}
+
+				meta_token = shift(&meta_tokenizer, -1);
+				if (!is_reserved_symbol(meta_token, '}'))
+				{
+					report(String("Expected a closing curly brace to denote the end of a union declaration."), &meta_tokenizer);
+					return 1;
+				}
+
+				for (i32 depth= 1; depth;)
+				{
 					meta_token = shift(&meta_tokenizer, -1);
-					if (!is_reserved_symbol(meta_token, ';'))
+
+					if (meta_token.type == TokenType::null)
 					{
-						report(String("Expected semicolon to denote the end of a union declaration."), &meta_tokenizer);
+						report(String("Failed to find the corresponding union for the meta operation."), &main_tokenizer);
 						return 1;
 					}
-
-					meta_token = shift(&meta_tokenizer, -1);
-					if (!is_reserved_symbol(meta_token, '}'))
+					else if (is_reserved_symbol(meta_token, '{'))
 					{
-						report(String("Expected a closing curly brace to denote the end of a union declaration."), &meta_tokenizer);
-						return 1;
-					}
-
-					for (i32 depth= 1; depth;)
-					{
-						meta_token = shift(&meta_tokenizer, -1);
-
-						if (meta_token.type == TokenType::null)
+						depth -= 1;
+						if (depth == 0)
 						{
-							report(String("Failed to find the corresponding union for the meta operation."), &main_tokenizer);
-							return 1;
-						}
-						else if (is_reserved_symbol(meta_token, '{'))
-						{
-							depth -= 1;
-							if (depth == 0)
+							meta_token = shift(&meta_tokenizer, -1);
+							if (!is_reserved_symbol(meta_token, ReservedSymbolType::a_union))
 							{
-								meta_token = shift(&meta_tokenizer, -1);
-								if (!is_reserved_symbol(meta_token, ReservedSymbolType::a_union))
-								{
-									report(String("Expected keyword `union` here."), &meta_tokenizer);
-									report(String("Failed to do meta operation."), &main_tokenizer);
-									return 1;
-								}
+								report(String("Expected keyword `union` here."), &meta_tokenizer);
+								report(String("Failed to do meta operation."), &main_tokenizer);
+								return 1;
 							}
 						}
-						else if (is_reserved_symbol(meta_token, '}'))
-						{
-							depth += 1;
-						}
 					}
-
-					MetaTypeContainer container;
-					if (!parse_container(&container, &meta_tokenizer, &main_arena))
+					else if (is_reserved_symbol(meta_token, '}'))
 					{
-						report(String("Failed to parse container for meta operation."), &main_tokenizer);
-						return 1;
-					}
-
-					if
-					(
-						!container.is_union
-						|| !container.declarations       || container.declarations->      declaration.underlying_type.type != MetaTypeType::container || container.declarations->declaration.underlying_type.container->is_union
-						|| !container.declarations->next || container.declarations->next->declaration.underlying_type.type != MetaTypeType::array
-					)
-					{
-						DEBUG_HALT();
-						report(String("Invalid layout for meta operation."), &main_tokenizer);
-						return 1;
-					}
-
-					StringBuilder* meta_builder  = init_string_builder(&main_arena);
-					StringBuilder* defer_builder = init_string_builder(&main_arena);
-
-					appendf(meta_builder, "global constexpr String META_%.*s[] =\n\t{\n", PASS_ISTR(file_name));
-
-					FOR_NODES(container.declarations->declaration.underlying_type.container->declarations)
-					{
-						if (!it->declaration.meta.size)
-						{
-							report(String("Not all assets have a file path."), &main_tokenizer);
-							return 1;
-						}
-
-						appendf(meta_builder, "\t\t");
-
-						i32 asset_path_count = 0;
-						for (String remaining = ltrim_whitespace(it->declaration.meta); remaining.size; remaining = ltrim_whitespace(remaining))
-						{
-							asset_path_count += 1;
-
-							String asset_path = remaining;
-							FOR_STR(c, asset_path)
-							{
-								if (*c == ',')
-								{
-									asset_path.size = c_index;
-									break;
-								}
-							}
-
-							remaining  = ltrim_whitespace(ltrim(remaining, asset_path.size + 1));
-							asset_path = rtrim_whitespace(asset_path);
-
-							appendf(meta_builder, "String(DATA_DIR \"%.*s\")", PASS_ISTR(asset_path));
-
-							if (remaining.size)
-							{
-								appendf(meta_builder, ", ");
-							}
-							else if (it->next)
-							{
-								appendf(meta_builder, ",");
-							}
-						}
-						appendf(meta_builder, "\n");
-
-						appendf
-						(
-							defer_builder,
-							"static_assert(sizeof(%.*s.%.*s) / sizeof(%.*s) == %d, \"(%.*s.)(%d) :: The amount of assets and file paths are not the same.\");\n",
-							PASS_ISTR(container.declarations->declaration.name),
-							PASS_ISTR(it->declaration.name),
-							PASS_ISTR(container.declarations->next->declaration.underlying_type.array->underlying_type.atom->name),
-							asset_path_count,
-							PASS_ISTR(container.declarations->declaration.name),
-							PASS_ISTR(it->declaration.name),
-							main_token.line_index + 1
-						);
-					}
-
-					appendf(meta_builder, "\t};\n");
-
-					append(meta_builder, defer_builder);
-
-					String meta_data = flush(meta_builder);
-					append(meta_builder, String(SRC_DIR));
-					append(meta_builder, file_path);
-
-					if (!write(flush(meta_builder), meta_data))
-					{
-						report(String("Failed to write meta data to file."), &main_tokenizer);
-						return 1;
+						depth += 1;
 					}
 				}
-				else if (meta_operation == String("variant"))
+
+				MetaTypeContainer container;
+				if (!parse_container(&container, &meta_tokenizer, &main_arena))
 				{
-					struct NamePairNode
+					report(String("Failed to parse container for meta operation."), &main_tokenizer);
+					return 1;
+				}
+
+				if
+				(
+					!container.is_union
+					|| !container.declarations       || container.declarations->      declaration.underlying_type.type != MetaTypeType::container || container.declarations->declaration.underlying_type.container->is_union
+					|| !container.declarations->next || container.declarations->next->declaration.underlying_type.type != MetaTypeType::array
+				)
+				{
+					report(String("Invalid layout for meta operation."), &main_tokenizer);
+					return 1;
+				}
+
+				StringBuilder* meta_builder  = init_string_builder(&main_arena);
+				StringBuilder* defer_builder = init_string_builder(&main_arena);
+
+				appendf(meta_builder, "global constexpr String META_%.*s[] =\n\t{\n", PASS_ISTR(file_name));
+
+				FOR_NODES(container.declarations->declaration.underlying_type.container->declarations)
+				{
+					if (!it->declaration.meta.size)
 					{
-						NamePairNode* next;
-						String        semantic;
-						String        container;
-					};
-
-					Tokenizer      meta_tokenizer = main_tokenizer;
-					StringBuilder* meta_builder   = init_string_builder(&main_arena);
-					NamePairNode*  name_pairs     = {};
-					Token          meta_token     = shift(&meta_tokenizer, -1);
-					for (; meta_token.type != TokenType::null && meta_token.text.data != main_token.text.data; meta_token = shift(&meta_tokenizer, -1))
-					{
-						if (meta_token.type == TokenType::meta && starts_with(meta_token.meta.info, file_name))
-						{
-							String semantic_name = ltrim(meta_token.meta.info, file_name.size);
-							if (semantic_name.size == 0 || !is_whitespace(semantic_name.data[0]))
-							{
-								continue;
-							}
-							semantic_name = trim_whitespace(semantic_name);
-							if (!is_valid_identifier(semantic_name))
-							{
-								report(String("Invalid identifier."), &meta_tokenizer);
-								report(String("Failed to do meta operation."), &main_tokenizer);
-								return 1;
-							}
-
-							meta_token = shift(&meta_tokenizer, -1);
-							if (meta_token.type != TokenType::identifier)
-							{
-								report(String("Expected identifier."), &meta_tokenizer);
-								report(String("Failed to do meta operation."), &main_tokenizer);
-								return 1;
-							}
-
-							String container_name = meta_token.text;
-
-							meta_token = shift(&meta_tokenizer, -1);
-							if (!is_reserved_symbol(meta_token, ReservedSymbolType::a_struct))
-							{
-								report(String("Expected `struct`."), &meta_tokenizer);
-								report(String("Failed to do meta operation."), &main_tokenizer);
-								return 1;
-							}
-
-							NamePairNode* node = allocate<NamePairNode>(&main_arena);
-							*node =
-								{
-									.next      = name_pairs,
-									.semantic  = semantic_name,
-									.container = container_name
-								};
-							name_pairs = node;
-						}
-					}
-
-					append(meta_builder, String("#pragma clang diagnostic push\n#pragma clang diagnostic ignored \"-Wunused-function\"\n"));
-
-					append(meta_builder, String("enum struct "));
-					append(meta_builder, file_name);
-					append(meta_builder, String("Type : u8\n{\n\tnull"));
-					FOR_NODES(name_pairs)
-					{
-						append(meta_builder, String(",\n\t"));
-						append(meta_builder, it->semantic);
-					}
-					append(meta_builder, String("\n};\n\nstruct "));
-					append(meta_builder, file_name);
-					append(meta_builder, String("\n{\n\t"));
-					append(meta_builder, file_name);
-					append(meta_builder, String("Type type;\n\tunion\n\t{\n"));
-					FOR_NODES(name_pairs)
-					{
-						append(meta_builder, String("\t\t"));
-						append(meta_builder, it->container);
-						append(meta_builder, String(" "));
-						append(meta_builder, it->semantic);
-						append(meta_builder, String(";\n"));
-					}
-					append(meta_builder, String("\t};\n};\n\nstruct "));
-					append(meta_builder, file_name);
-					append(meta_builder, String("Ptr\n{\n\t"));
-					append(meta_builder, file_name);
-					append(meta_builder, String("Type type;\n\tunion\n\t{\n"));
-					FOR_NODES(name_pairs)
-					{
-						append(meta_builder, String("\t\t"));
-						append(meta_builder, it->container);
-						append(meta_builder, String("* "));
-						append(meta_builder, it->semantic);
-						append(meta_builder, String(";\n"));
-					}
-					append(meta_builder, String("\t};\n};\n\n"));
-
-					FOR_NODES(name_pairs)
-					{
-						appendf(meta_builder, "procedure %.*s    widen(const %.*s& x) { return { %.*sType::%.*s, { .%.*s = x } }; }\n", PASS_ISTR(file_name), PASS_ISTR(it->container), PASS_ISTR(file_name), PASS_ISTR(it->semantic), PASS_ISTR(it->semantic));
-						appendf(meta_builder, "procedure %.*sPtr widen(      %.*s* x) { return { %.*sType::%.*s, { .%.*s = x } }; }\n", PASS_ISTR(file_name), PASS_ISTR(it->container), PASS_ISTR(file_name), PASS_ISTR(it->semantic), PASS_ISTR(it->semantic));
-					}
-
-					append(meta_builder, String("#pragma clang diagnostic pop\n"));
-
-					String meta_data = flush(meta_builder);
-					append(meta_builder, String(SRC_DIR));
-					append(meta_builder, file_path);
-
-					if (!write(flush(meta_builder), meta_data))
-					{
-						report(String("Failed to write meta data to file."), &main_tokenizer);
+						report(String("Not all assets have a file path."), &main_tokenizer);
 						return 1;
 					}
-				}
-				else if (meta_operation == String("flag"))
-				{
-					Tokenizer meta_tokenizer = main_tokenizer;
-					Token     meta_token = shift(&meta_tokenizer, -1);
 
-					while (true)
+					appendf(meta_builder, "\t\t");
+
+					i32 asset_path_count = 0;
+					for (String remaining = ltrim_whitespace(it->declaration.meta); remaining.size; remaining = ltrim_whitespace(remaining))
 					{
-						if (meta_token.type == TokenType::null)
+						asset_path_count += 1;
+
+						String asset_path = remaining;
+						FOR_STR(c, asset_path)
 						{
-							report(String("Failed to find the corresponding enumerator for the meta operation."), &main_tokenizer);
-							return 1;
-						}
-						else if (meta_token.type == TokenType::identifier && meta_token.text == file_name)
-						{
-							meta_token = shift(&meta_tokenizer, -1);
-							if (is_reserved_symbol(meta_token, ReservedSymbolType::a_struct))
+							if (*c == ',')
 							{
-								meta_token = shift(&meta_tokenizer, -1);
-							}
-							if (is_reserved_symbol(meta_token, ReservedSymbolType::a_enum))
-							{
+								asset_path.size = c_index;
 								break;
 							}
 						}
 
-						meta_token = shift(&meta_tokenizer, -1);
-					}
+						remaining  = ltrim_whitespace(ltrim(remaining, asset_path.size + 1));
+						asset_path = rtrim_whitespace(asset_path);
 
-					MetaTypeEnumerator enumerator;
-					if (!parse_enumerator(&enumerator, &meta_tokenizer, &main_arena))
-					{
-						report(String("Failed to parse enumerator for meta operation."), &main_tokenizer);
-						return 1;
-					}
+						appendf(meta_builder, "String(DATA_DIR \"%.*s\")", PASS_ISTR(asset_path));
 
-					StringBuilder* meta_builder = init_string_builder(&main_arena);
-
-					appendf(meta_builder, "#pragma clang diagnostic push\n#pragma clang diagnostic ignored \"-Wunused-function\"\n");
-
-					#define TYPE PASS_ISTR(enumerator.underlying_type.name)
-					#define NAME PASS_ISTR(file_name)
-					appendf(meta_builder, "procedure constexpr %.*s operator+ (const %.*s& a) { return static_cast<%.*s>(a); }\n", TYPE, NAME, TYPE);
-					appendf(meta_builder, "procedure constexpr %.*s operator~ (const %.*s& a) { return static_cast<%.*s>(~static_cast<%.*s>(a)); }\n", NAME, NAME, NAME, TYPE);
-
-					appendf(meta_builder, "procedure constexpr %.*s operator&  (const %.*s& a, const %.*s& b) { return     static_cast<%.*s>(static_cast<%.*s>(a) & static_cast<%.*s>(b)); }\n", NAME, NAME, NAME, NAME, TYPE, TYPE);
-					appendf(meta_builder, "procedure constexpr %.*s operator|  (const %.*s& a, const %.*s& b) { return     static_cast<%.*s>(static_cast<%.*s>(a) | static_cast<%.*s>(b)); }\n", NAME, NAME, NAME, NAME, TYPE, TYPE);
-					appendf(meta_builder, "procedure constexpr %.*s operator^  (const %.*s& a, const %.*s& b) { return     static_cast<%.*s>(static_cast<%.*s>(a) ^ static_cast<%.*s>(b)); }\n", NAME, NAME, NAME, NAME, TYPE, TYPE);
-					appendf(meta_builder, "procedure constexpr %.*s operator&= (      %.*s& a, const %.*s& b) { return a = static_cast<%.*s>(static_cast<%.*s>(a) & static_cast<%.*s>(b)); }\n", NAME, NAME, NAME, NAME, TYPE, TYPE);
-					appendf(meta_builder, "procedure constexpr %.*s operator|= (      %.*s& a, const %.*s& b) { return a = static_cast<%.*s>(static_cast<%.*s>(a) | static_cast<%.*s>(b)); }\n", NAME, NAME, NAME, NAME, TYPE, TYPE);
-					appendf(meta_builder, "procedure constexpr %.*s operator^= (      %.*s& a, const %.*s& b) { return a = static_cast<%.*s>(static_cast<%.*s>(a) ^ static_cast<%.*s>(b)); }\n", NAME, NAME, NAME, NAME, TYPE, TYPE);
-
-					appendf(meta_builder, "procedure constexpr %.*s operator<< (const %.*s& a, const %.*s n) { return     static_cast<%.*s>(static_cast<%.*s>(a) << n); }\n", NAME, NAME, TYPE, NAME);
-					appendf(meta_builder, "procedure constexpr %.*s operator>> (const %.*s& a, const %.*s n) { return     static_cast<%.*s>(static_cast<%.*s>(a) >> n); }\n", NAME, NAME, TYPE, NAME);
-					appendf(meta_builder, "procedure constexpr %.*s operator<<=(      %.*s& a, const %.*s n) { return a = static_cast<%.*s>(static_cast<%.*s>(a) << n); }\n", NAME, NAME, TYPE, NAME);
-					appendf(meta_builder, "procedure constexpr %.*s operator>>=(      %.*s& a, const %.*s n) { return a = static_cast<%.*s>(static_cast<%.*s>(a) >> n); }\n", NAME, NAME, TYPE, NAME);
-
-					appendf(meta_builder, "global constexpr struct META_%.*s_t { %.*s flag; %.*s value; union { String str; struct { byte PADDING_[offsetof(String, data)]; strlit cstr; }; }; } META_%.*s[] =\n", NAME, NAME, TYPE, NAME);
-					appendf(meta_builder, "\t{\n");
-
-					bool32 reported_implicit_member = false;
-					FOR_NODES(enumerator.members)
-					{
-						#define MEMBER PASS_ISTR(it->name)
-						if (!reported_implicit_member && !it->definition)
+						if (remaining.size)
 						{
-							reported_implicit_member = true;
-							printf(":: WaRNING : Flag member (%.*s::%.*s) has implicit definition.\n", NAME, MEMBER);
-							report(String("Warning from this meta operation."), &main_tokenizer);
+							appendf(meta_builder, ", ");
 						}
-
-						appendf(meta_builder, "\t\t{ %.*s::%.*s, static_cast<%.*s>(%.*s::%.*s), String(\"%.*s\") }", NAME, MEMBER, TYPE, NAME, MEMBER, MEMBER);
-						if (it->next)
+						else if (it->next)
 						{
 							appendf(meta_builder, ",");
 						}
-						appendf(meta_builder, "\n");
-						#undef MEMBER
 					}
+					appendf(meta_builder, "\n");
 
-					appendf(meta_builder, "\t};\n");
-					#undef TYPE
-					#undef NAME
+					appendf
+					(
+						defer_builder,
+						"static_assert(sizeof(%.*s.%.*s) / sizeof(%.*s) == %d, \"(%.*s.)(%d) :: The amount of assets and file paths are not the same.\");\n",
+						PASS_ISTR(container.declarations->declaration.name),
+						PASS_ISTR(it->declaration.name),
+						PASS_ISTR(container.declarations->next->declaration.underlying_type.array->underlying_type.atom->name),
+						asset_path_count,
+						PASS_ISTR(container.declarations->declaration.name),
+						PASS_ISTR(it->declaration.name),
+						main_token.line_index + 1
+					);
+				}
 
-					appendf(meta_builder, "#pragma clang diagnostic pop\n");
+				appendf(meta_builder, "\t};\n");
 
-					String meta_data = flush(meta_builder);
-					append(meta_builder, String(SRC_DIR));
-					append(meta_builder, file_path);
+				append(meta_builder, defer_builder);
 
-					if (!write(flush(meta_builder), meta_data))
+				String meta_data = flush(meta_builder);
+				append(meta_builder, String(SRC_DIR));
+				append(meta_builder, file_path);
+
+				if (!write(flush(meta_builder), meta_data))
+				{
+					report(String("Failed to write meta data to file."), &main_tokenizer);
+					return 1;
+				}
+			}
+			else if (meta_operation == String("variant"))
+			{
+				bool32 is_forwarded = starts_with(file_extension, String(".forward"));
+				String forwarded_file_path;
+				String forwarded_file_name;
+				String forwarded_file_extension;
+				String forwarded_meta_operation;
+				if (is_forwarded)
+				{
+					forwarded_file_path      = file_path;
+					forwarded_file_name      = file_name;
+					forwarded_file_extension = file_extension;
+					forwarded_meta_operation = meta_operation;
+
+					while (true)
 					{
-						report(String("Failed to write meta data to file."), &main_tokenizer);
+						main_token = shift(&main_tokenizer, 1);
+						if (main_token.type == TokenType::null)
+						{
+							printf(":: EOF found when trying to find the corresponding meta operation for `%.*s`.\n", PASS_ISTR(file_path));
+							return 1;
+						}
+						else if
+						(
+							parse_include_meta(&file_path, &file_name, &file_extension, &meta_operation, main_token.text)
+							&& file_name == forwarded_file_name
+							&& meta_operation == forwarded_meta_operation
+						)
+						{
+							break;
+						}
+					}
+				}
+
+				struct NamePairNode
+				{
+					NamePairNode* next;
+					String        semantic;
+					String        container;
+				};
+
+				Tokenizer      meta_tokenizer = main_tokenizer;
+				NamePairNode*  name_pairs     = {};
+				Token          meta_token     = shift(&meta_tokenizer, -1);
+				for (; meta_token.type != TokenType::null && meta_token.text.data != main_token.text.data; meta_token = shift(&meta_tokenizer, -1))
+				{
+					if (meta_token.type == TokenType::meta && starts_with(meta_token.meta.info, file_name))
+					{
+						String semantic_name = ltrim(meta_token.meta.info, file_name.size);
+						if (semantic_name.size == 0 || !is_whitespace(semantic_name.data[0]))
+						{
+							continue;
+						}
+						semantic_name = trim_whitespace(semantic_name);
+						if (!is_valid_identifier(semantic_name))
+						{
+							report(String("Invalid identifier."), &meta_tokenizer);
+							report(String("Failed to do meta operation."), &main_tokenizer);
+							return 1;
+						}
+
+						meta_token = shift(&meta_tokenizer, -1);
+						if (meta_token.type != TokenType::identifier)
+						{
+							report(String("Expected identifier."), &meta_tokenizer);
+							report(String("Failed to do meta operation."), &main_tokenizer);
+							return 1;
+						}
+
+						String container_name = meta_token.text;
+
+						meta_token = shift(&meta_tokenizer, -1);
+						if (!is_reserved_symbol(meta_token, ReservedSymbolType::a_struct))
+						{
+							report(String("Expected `struct`."), &meta_tokenizer);
+							report(String("Failed to do meta operation."), &main_tokenizer);
+							return 1;
+						}
+
+						NamePairNode* node = allocate<NamePairNode>(&main_arena);
+						*node =
+							{
+								.next      = name_pairs,
+								.semantic  = semantic_name,
+								.container = container_name
+							};
+						name_pairs = node;
+					}
+				}
+
+				if (!name_pairs)
+				{
+					report(String("Could not find structures for meta operation."), &main_tokenizer);
+					return 1;
+				}
+
+				StringBuilder* meta_builder = init_string_builder(&main_arena);
+
+				{
+					appendf(meta_builder, "enum struct %.*sType : u8\n{\n\tnull", PASS_ISTR(file_name));
+					FOR_NODES(name_pairs)
+					{
+						appendf(meta_builder, ",\n\t%.*s", PASS_ISTR(it->semantic));
+					}
+					appendf(meta_builder, "\n};\n");
+
+					appendf(meta_builder, "\n");
+
+					appendf(meta_builder, "struct %.*sPtr\n{\n\t%.*sType type;\n\tunion\n\t{\n", PASS_ISTR(file_name), PASS_ISTR(file_name));
+					FOR_NODES(name_pairs)
+					{
+						appendf(meta_builder, "\t\tstruct %.*s* %.*s;\n", PASS_ISTR(it->container), PASS_ISTR(it->semantic));
+					}
+					append(meta_builder, String("\t};\n"));
+					appendf(meta_builder, "};\n");
+				}
+
+				if (is_forwarded)
+				{
+					String forwarded_meta_data = flush(meta_builder);
+					append(meta_builder, String(SRC_DIR));
+					append(meta_builder, forwarded_file_path);
+
+					if (!write(flush(meta_builder), forwarded_meta_data))
+					{
+						report(String("Failed to write forwarded meta data to file."), &main_tokenizer);
 						return 1;
 					}
 				}
 				else
 				{
-					report(String("Unknown meta operation."), &main_tokenizer);
+					appendf(meta_builder, "\n");
+				}
+
+				{
+					appendf(meta_builder, "struct %.*s\n{\n\t%.*sType type;\n\tunion\n\t{\n", PASS_ISTR(file_name), PASS_ISTR(file_name));
+					FOR_NODES(name_pairs)
+					{
+						appendf(meta_builder, "\t\t%.*s %.*s;\n", PASS_ISTR(it->container), PASS_ISTR(it->semantic));
+					}
+					appendf(meta_builder, "\t};\n};\n");
+				}
+
+				appendf(meta_builder, "\n");
+
+				{
+					appendf(meta_builder, "#pragma clang diagnostic push\n#pragma clang diagnostic ignored \"-Wunused-function\"\n");
+					FOR_NODES(name_pairs)
+					{
+						appendf
+						(
+							meta_builder,
+							"procedure %.*s    widen(const %.*s& x) { return { %.*sType::%.*s, { .%.*s = x } }; }\n"
+							"procedure %.*sPtr widen(      %.*s* x) { return { %.*sType::%.*s, { .%.*s = x } }; }\n",
+							PASS_ISTR(file_name), PASS_ISTR(it->container), PASS_ISTR(file_name), PASS_ISTR(it->semantic), PASS_ISTR(it->semantic),
+							PASS_ISTR(file_name), PASS_ISTR(it->container), PASS_ISTR(file_name), PASS_ISTR(it->semantic), PASS_ISTR(it->semantic)
+						);
+					}
+					append(meta_builder, String("#pragma clang diagnostic pop\n"));
+				}
+
+				String meta_data = flush(meta_builder);
+				append(meta_builder, String(SRC_DIR));
+				append(meta_builder, file_path);
+
+				if (!write(flush(meta_builder), meta_data))
+				{
+					report(String("Failed to write meta data to file."), &main_tokenizer);
 					return 1;
 				}
+			}
+			else if (meta_operation == String("flag"))
+			{
+				Tokenizer meta_tokenizer = main_tokenizer;
+				Token     meta_token = shift(&meta_tokenizer, -1);
+
+				while (true)
+				{
+					if (meta_token.type == TokenType::null)
+					{
+						report(String("Failed to find the corresponding enumerator for the meta operation."), &main_tokenizer);
+						return 1;
+					}
+					else if (meta_token.type == TokenType::identifier && meta_token.text == file_name)
+					{
+						meta_token = shift(&meta_tokenizer, -1);
+						if (is_reserved_symbol(meta_token, ReservedSymbolType::a_struct))
+						{
+							meta_token = shift(&meta_tokenizer, -1);
+						}
+						if (is_reserved_symbol(meta_token, ReservedSymbolType::a_enum))
+						{
+							break;
+						}
+					}
+
+					meta_token = shift(&meta_tokenizer, -1);
+				}
+
+				MetaTypeEnumerator enumerator;
+				if (!parse_enumerator(&enumerator, &meta_tokenizer, &main_arena))
+				{
+					report(String("Failed to parse enumerator for meta operation."), &main_tokenizer);
+					return 1;
+				}
+
+				StringBuilder* meta_builder = init_string_builder(&main_arena);
+
+				appendf(meta_builder, "#pragma clang diagnostic push\n#pragma clang diagnostic ignored \"-Wunused-function\"\n");
+
+				#define TYPE PASS_ISTR(enumerator.underlying_type.name)
+				#define NAME PASS_ISTR(file_name)
+				appendf(meta_builder, "procedure constexpr %.*s operator+ (const %.*s& a) { return static_cast<%.*s>(a); }\n", TYPE, NAME, TYPE);
+				appendf(meta_builder, "procedure constexpr %.*s operator~ (const %.*s& a) { return static_cast<%.*s>(~static_cast<%.*s>(a)); }\n", NAME, NAME, NAME, TYPE);
+
+				appendf(meta_builder, "procedure constexpr %.*s operator&  (const %.*s& a, const %.*s& b) { return     static_cast<%.*s>(static_cast<%.*s>(a) & static_cast<%.*s>(b)); }\n", NAME, NAME, NAME, NAME, TYPE, TYPE);
+				appendf(meta_builder, "procedure constexpr %.*s operator|  (const %.*s& a, const %.*s& b) { return     static_cast<%.*s>(static_cast<%.*s>(a) | static_cast<%.*s>(b)); }\n", NAME, NAME, NAME, NAME, TYPE, TYPE);
+				appendf(meta_builder, "procedure constexpr %.*s operator^  (const %.*s& a, const %.*s& b) { return     static_cast<%.*s>(static_cast<%.*s>(a) ^ static_cast<%.*s>(b)); }\n", NAME, NAME, NAME, NAME, TYPE, TYPE);
+				appendf(meta_builder, "procedure constexpr %.*s operator&= (      %.*s& a, const %.*s& b) { return a = static_cast<%.*s>(static_cast<%.*s>(a) & static_cast<%.*s>(b)); }\n", NAME, NAME, NAME, NAME, TYPE, TYPE);
+				appendf(meta_builder, "procedure constexpr %.*s operator|= (      %.*s& a, const %.*s& b) { return a = static_cast<%.*s>(static_cast<%.*s>(a) | static_cast<%.*s>(b)); }\n", NAME, NAME, NAME, NAME, TYPE, TYPE);
+				appendf(meta_builder, "procedure constexpr %.*s operator^= (      %.*s& a, const %.*s& b) { return a = static_cast<%.*s>(static_cast<%.*s>(a) ^ static_cast<%.*s>(b)); }\n", NAME, NAME, NAME, NAME, TYPE, TYPE);
+
+				appendf(meta_builder, "procedure constexpr %.*s operator<< (const %.*s& a, const %.*s n) { return     static_cast<%.*s>(static_cast<%.*s>(a) << n); }\n", NAME, NAME, TYPE, NAME);
+				appendf(meta_builder, "procedure constexpr %.*s operator>> (const %.*s& a, const %.*s n) { return     static_cast<%.*s>(static_cast<%.*s>(a) >> n); }\n", NAME, NAME, TYPE, NAME);
+				appendf(meta_builder, "procedure constexpr %.*s operator<<=(      %.*s& a, const %.*s n) { return a = static_cast<%.*s>(static_cast<%.*s>(a) << n); }\n", NAME, NAME, TYPE, NAME);
+				appendf(meta_builder, "procedure constexpr %.*s operator>>=(      %.*s& a, const %.*s n) { return a = static_cast<%.*s>(static_cast<%.*s>(a) >> n); }\n", NAME, NAME, TYPE, NAME);
+
+				appendf(meta_builder, "global constexpr struct META_%.*s_t { %.*s flag; %.*s value; union { String str; struct { byte PADDING_[offsetof(String, data)]; strlit cstr; }; }; } META_%.*s[] =\n", NAME, NAME, TYPE, NAME);
+				appendf(meta_builder, "\t{\n");
+
+				bool32 reported_implicit_member = false;
+				FOR_NODES(enumerator.members)
+				{
+					#define MEMBER PASS_ISTR(it->name)
+					if (!reported_implicit_member && !it->definition)
+					{
+						reported_implicit_member = true;
+						printf(":: WaRNING : Flag member (%.*s::%.*s) has implicit definition.\n", NAME, MEMBER);
+						report(String("Warning from this meta operation."), &main_tokenizer);
+					}
+
+					appendf(meta_builder, "\t\t{ %.*s::%.*s, static_cast<%.*s>(%.*s::%.*s), String(\"%.*s\") }", NAME, MEMBER, TYPE, NAME, MEMBER, MEMBER);
+					if (it->next)
+					{
+						appendf(meta_builder, ",");
+					}
+					appendf(meta_builder, "\n");
+					#undef MEMBER
+				}
+
+				appendf(meta_builder, "\t};\n");
+				#undef TYPE
+				#undef NAME
+
+				appendf(meta_builder, "#pragma clang diagnostic pop\n");
+
+				String meta_data = flush(meta_builder);
+				append(meta_builder, String(SRC_DIR));
+				append(meta_builder, file_path);
+
+				if (!write(flush(meta_builder), meta_data))
+				{
+					report(String("Failed to write meta data to file."), &main_tokenizer);
+					return 1;
+				}
+			}
+			else
+			{
+				report(String("Unknown meta operation."), &main_tokenizer);
+				return 1;
 			}
 		}
 	}

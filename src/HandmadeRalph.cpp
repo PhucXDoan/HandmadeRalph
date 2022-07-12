@@ -6,7 +6,6 @@
 
 // @TODO@ Handle world chunk edges.
 
-
 constexpr f32 PIXELS_PER_METER = 50.0f;
 constexpr f32 METERS_PER_CHUNK = 16.0f;
 constexpr f32 GRAVITY          = -9.80665f;
@@ -49,6 +48,8 @@ enum struct MonstarFlag : u8
 #include "META/flag/MonstarFlag.h"
 
 struct Chunk;
+
+#include "META/variant/Entity.forward.h"
 
 struct EntityTree // @META@ Entity tree
 {

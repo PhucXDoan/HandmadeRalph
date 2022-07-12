@@ -613,6 +613,11 @@ procedure constexpr bool32 starts_with(const String& str, const String& prefix)
 	return ltrunc(str, prefix.size) == prefix;
 }
 
+procedure constexpr bool32 ends_with(const String& str, const String& postfix)
+{
+	return rtrunc(str, postfix.size) == postfix;
+}
+
 procedure constexpr String ltrim_whitespace(const String& str)
 {
 	FOR_STR(str)
