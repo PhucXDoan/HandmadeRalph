@@ -1514,65 +1514,46 @@ int main()
 					}
 				}
 
-				struct NamePairNode
+				Tokenizer    meta_tokenizer = main_tokenizer;
+				StringNode*  members        = {};
+				Token        meta_token     = shift(&meta_tokenizer, 1);
+				if (meta_token.type != TokenType::meta)
 				{
-					NamePairNode* next;
-					String        semantic;
-					String        container;
-				};
+					report(String("Expected meta tag to list the members."), &meta_tokenizer);
+					return 1;
+				}
 
-				Tokenizer      meta_tokenizer = main_tokenizer;
-				NamePairNode*  name_pairs     = {};
-				Token          meta_token     = shift(&meta_tokenizer, -1);
-				for (; meta_token.type != TokenType::null && meta_token.text.data != main_token.text.data; meta_token = shift(&meta_tokenizer, -1))
 				{
-					if (meta_token.type == TokenType::meta && starts_with(meta_token.meta.info, file_name))
+					String       remaining = meta_token.meta.info;
+					StringNode** nil       = &members;
+					while (remaining.size)
 					{
-						String semantic_name = ltrim(meta_token.meta.info, file_name.size);
-						if (semantic_name.size == 0 || !is_whitespace(semantic_name.data[0]))
+						String member = remaining;
+						FOR_STR(remaining)
 						{
-							continue;
-						}
-						semantic_name = trim_whitespace(semantic_name);
-						if (!is_valid_identifier(semantic_name))
-						{
-							report(String("Invalid identifier."), &meta_tokenizer);
-							report(String("Failed to do meta operation."), &main_tokenizer);
-							return 1;
-						}
-
-						meta_token = shift(&meta_tokenizer, -1);
-						if (meta_token.type != TokenType::identifier)
-						{
-							report(String("Expected identifier."), &meta_tokenizer);
-							report(String("Failed to do meta operation."), &main_tokenizer);
-							return 1;
-						}
-
-						String container_name = meta_token.text;
-
-						meta_token = shift(&meta_tokenizer, -1);
-						if (!is_reserved_symbol(meta_token, ReservedSymbolType::a_struct))
-						{
-							report(String("Expected `struct`."), &meta_tokenizer);
-							report(String("Failed to do meta operation."), &main_tokenizer);
-							return 1;
-						}
-
-						NamePairNode* node = allocate<NamePairNode>(&main_arena);
-						*node =
+							if (*it == ',')
 							{
-								.next      = name_pairs,
-								.semantic  = semantic_name,
-								.container = container_name
-							};
-						name_pairs = node;
+								member.size = it_index;
+								break;
+							}
+						}
+						remaining = ltrim(remaining, member.size + 1);
+						member    = rtrim_whitespace(member);
+
+						if (member.size)
+						{
+							*nil  = allocate<StringNode>(&main_arena);
+							**nil = { .str = member };
+							nil   = &(*nil)->next;
+						}
+
+						remaining = ltrim_whitespace(remaining);
 					}
 				}
 
-				if (!name_pairs)
+				if (!members)
 				{
-					report(String("Could not find structures for meta operation."), &main_tokenizer);
+					report(String("No members listed."), &main_tokenizer);
 					return 1;
 				}
 
@@ -1580,18 +1561,18 @@ int main()
 
 				{
 					appendf(meta_builder, "enum struct %.*sType : u8\n{\n\tnull", PASS_ISTR(file_name));
-					FOR_NODES(name_pairs)
+					FOR_NODES(members)
 					{
-						appendf(meta_builder, ",\n\t%.*s", PASS_ISTR(it->semantic));
+						appendf(meta_builder, ",\n\t%.*s", PASS_ISTR(it->str));
 					}
 					appendf(meta_builder, "\n};\n");
 
 					appendf(meta_builder, "\n");
 
 					appendf(meta_builder, "struct %.*sRef\n{\n\t%.*sType ref_type;\n\tunion\n\t{\n", PASS_ISTR(file_name), PASS_ISTR(file_name));
-					FOR_NODES(name_pairs)
+					FOR_NODES(members)
 					{
-						appendf(meta_builder, "\t\tstruct %.*s* %.*s;\n", PASS_ISTR(it->container), PASS_ISTR(it->semantic));
+						appendf(meta_builder, "\t\tstruct %.*s* %.*s_;\n", PASS_ISTR(it->str), PASS_ISTR(it->str));
 					}
 					append(meta_builder, String("\t};\n"));
 					appendf(meta_builder, "};\n");
@@ -1616,9 +1597,9 @@ int main()
 
 				{
 					appendf(meta_builder, "struct %.*s\n{\n\t%.*sType type;\n\tunion\n\t{\n", PASS_ISTR(file_name), PASS_ISTR(file_name));
-					FOR_NODES(name_pairs)
+					FOR_NODES(members)
 					{
-						appendf(meta_builder, "\t\t%.*s %.*s;\n", PASS_ISTR(it->container), PASS_ISTR(it->semantic));
+						appendf(meta_builder, "\t\t%.*s %.*s_;\n", PASS_ISTR(it->str), PASS_ISTR(it->str));
 					}
 					appendf(meta_builder, "\t};\n};\n");
 				}
@@ -1627,79 +1608,15 @@ int main()
 
 				{
 					appendf(meta_builder, "#pragma clang diagnostic push\n#pragma clang diagnostic ignored \"-Wunused-function\"\n");
-					appendf(meta_builder, "procedure constexpr %.*sRef ref(%.*s* x) { return { x->type, { .%.*s = &x->%.*s } }; }\n", PASS_ISTR(file_name), PASS_ISTR(file_name), PASS_ISTR(name_pairs->semantic), PASS_ISTR(name_pairs->semantic));
-					FOR_NODES(name_pairs)
+					appendf(meta_builder, "procedure constexpr %.*sRef ref(%.*s* x) { return { x->type, { .%.*s_ = &x->%.*s_ } }; }\n", PASS_ISTR(file_name), PASS_ISTR(file_name), PASS_ISTR(members->str), PASS_ISTR(members->str));
+					FOR_NODES(members)
 					{
-						// @TODO@ Is `widen` good? It makes a copy to generalize a unit, but this could be done by accident, whena reference or pointer is meant.
-						#if 0
-						appendf(meta_builder, "procedure constexpr %.*s    widen(const %.*s& x) { return { %.*sType::%.*s, { .%.*s = x } }; }\n", PASS_ISTR(file_name), PASS_ISTR(it->container), PASS_ISTR(file_name), PASS_ISTR(it->semantic), PASS_ISTR(it->semantic));
-						#endif
-						appendf(meta_builder, "procedure constexpr %.*sRef ref(%.*s* x) { return { %.*sType::%.*s, { .%.*s = x } }; }\n", PASS_ISTR(file_name), PASS_ISTR(it->container), PASS_ISTR(file_name), PASS_ISTR(it->semantic), PASS_ISTR(it->semantic));
-						appendf(meta_builder, "procedure bool32 deref(%.*s** x, %.*s*   y) { *x = &y->%.*s; return y->type     == %.*sType::%.*s; }\n", PASS_ISTR(it->container), PASS_ISTR(file_name), PASS_ISTR(it->semantic), PASS_ISTR(file_name), PASS_ISTR(it->semantic));
-						appendf(meta_builder, "procedure bool32 deref(%.*s** x, %.*sRef y) { *x =  y. %.*s; return y. ref_type == %.*sType::%.*s; }\n", PASS_ISTR(it->container), PASS_ISTR(file_name), PASS_ISTR(it->semantic), PASS_ISTR(file_name), PASS_ISTR(it->semantic));
+						// @TODO@ If a member is used in two different variants, there will be ambiguity as to what variant to widen to or to make a ref as.
+						appendf(meta_builder, "procedure constexpr %.*s widen(const %.*s& x) { return { %.*sType::%.*s, { .%.*s_ = x } }; }\n", PASS_ISTR(file_name), PASS_ISTR(it->str), PASS_ISTR(file_name), PASS_ISTR(it->str), PASS_ISTR(it->str));
+						appendf(meta_builder, "procedure constexpr %.*sRef ref(%.*s* x) { return { %.*sType::%.*s, { .%.*s_ = x } }; }\n", PASS_ISTR(file_name), PASS_ISTR(it->str), PASS_ISTR(file_name), PASS_ISTR(it->str), PASS_ISTR(it->str));
+						appendf(meta_builder, "procedure bool32 deref(%.*s** x, %.*s*   y) { *x = &y->%.*s_; return y->type     == %.*sType::%.*s; }\n", PASS_ISTR(it->str), PASS_ISTR(file_name), PASS_ISTR(it->str), PASS_ISTR(file_name), PASS_ISTR(it->str));
+						appendf(meta_builder, "procedure bool32 deref(%.*s** x, %.*sRef y) { *x =  y. %.*s_; return y. ref_type == %.*sType::%.*s; }\n", PASS_ISTR(it->str), PASS_ISTR(file_name), PASS_ISTR(it->str), PASS_ISTR(file_name), PASS_ISTR(it->str));
 					}
-
-					#if 0 // @NOTE@ Complex template procedure to swap variants easily.
-					appendf(meta_builder, "\n");
-					appendf(meta_builder, "template <typename A, typename B>\n");
-					appendf(meta_builder, "procedure bool32 pairing(A** a, B** b, %.*sRef& p, %.*sRef& q)\n", PASS_ISTR(file_name), PASS_ISTR(file_name));
-					appendf(meta_builder, "{\n");
-					constexpr char PAIR[2] = { 'A', 'B' };
-					FOR_ELEMS(pair, PAIR)
-					{
-						appendf(meta_builder, "\tconstexpr %.*sType %c_TYPE =\n", PASS_ISTR(file_name), *pair);
-						FOR_NODES(name_pairs)
-						{
-							appendf(meta_builder, "\t\tstd::is_same<%c, %.*s>::value ? %.*sType::%.*s :\n", *pair, PASS_ISTR(it->container), PASS_ISTR(file_name), PASS_ISTR(it->semantic));
-						}
-						appendf(meta_builder, "\t\t\t%.*sType::null;\n", PASS_ISTR(file_name));
-					}
-
-					appendf(meta_builder, "\tstatic_assert(A_TYPE != %.*sType::null, \":: Type was not recongize as part of the variant.\");\n", PASS_ISTR(file_name));
-					appendf(meta_builder, "\tif (p.ref_type == A_TYPE && q.ref_type == B_TYPE)\n");
-					appendf(meta_builder, "\t{\n");
-					appendf(meta_builder, "\t	*a = reinterpret_cast<A*>(p.%.*s);\n", PASS_ISTR(name_pairs->semantic));
-					appendf(meta_builder, "\t	*b = reinterpret_cast<B*>(q.%.*s);\n", PASS_ISTR(name_pairs->semantic));
-					appendf(meta_builder, "\t	return true;\n");
-					appendf(meta_builder, "\t}\n");
-					appendf(meta_builder, "\telse if (p.ref_type == B_TYPE && q.ref_type == A_TYPE)\n");
-					appendf(meta_builder, "\t{\n");
-					appendf(meta_builder, "\t	*a = reinterpret_cast<A*>(q.%.*s);\n", PASS_ISTR(name_pairs->semantic));
-					appendf(meta_builder, "\t	*b = reinterpret_cast<B*>(p.%.*s);\n", PASS_ISTR(name_pairs->semantic));
-					appendf(meta_builder, "\t	return true;\n");
-					appendf(meta_builder, "\t}\n");
-					appendf(meta_builder, "\treturn false;\n");
-					appendf(meta_builder, "}\n");
-
-					appendf(meta_builder, "template <typename A, typename B>\n");
-					appendf(meta_builder, "procedure bool32 pairing(A** a, B** b, %.*s* p, %.*s* q)\n", PASS_ISTR(file_name), PASS_ISTR(file_name));
-					appendf(meta_builder, "{\n");
-					FOR_ELEMS(pair, PAIR)
-					{
-						appendf(meta_builder, "\tconstexpr %.*sType %c_TYPE =\n", PASS_ISTR(file_name), *pair);
-						FOR_NODES(name_pairs)
-						{
-							appendf(meta_builder, "\t\tstd::is_same<%c, %.*s>::value ? %.*sType::%.*s :\n", *pair, PASS_ISTR(it->container), PASS_ISTR(file_name), PASS_ISTR(it->semantic));
-						}
-						appendf(meta_builder, "\t\t\t%.*sType::null;\n", PASS_ISTR(file_name));
-					}
-
-					appendf(meta_builder, "\tstatic_assert(A_TYPE != %.*sType::null, \":: Type was not recongize as part of the variant.\");\n", PASS_ISTR(file_name));
-					appendf(meta_builder, "\tif (p->type == A_TYPE && q->type == B_TYPE)\n");
-					appendf(meta_builder, "\t{\n");
-					appendf(meta_builder, "\t	*a = reinterpret_cast<A*>(&p->%.*s);\n", PASS_ISTR(name_pairs->semantic));
-					appendf(meta_builder, "\t	*b = reinterpret_cast<B*>(&q->%.*s);\n", PASS_ISTR(name_pairs->semantic));
-					appendf(meta_builder, "\t	return true;\n");
-					appendf(meta_builder, "\t}\n");
-					appendf(meta_builder, "\telse if (p->type == B_TYPE && q->type == A_TYPE)\n");
-					appendf(meta_builder, "\t{\n");
-					appendf(meta_builder, "\t	*a = reinterpret_cast<A*>(&q->%.*s);\n", PASS_ISTR(name_pairs->semantic));
-					appendf(meta_builder, "\t	*b = reinterpret_cast<B*>(&p->%.*s);\n", PASS_ISTR(name_pairs->semantic));
-					appendf(meta_builder, "\t	return true;\n");
-					appendf(meta_builder, "\t}\n");
-					appendf(meta_builder, "\treturn false;\n");
-					appendf(meta_builder, "}\n");
-					#endif
 
 					append(meta_builder, String("#pragma clang diagnostic pop\n"));
 				}
