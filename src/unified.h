@@ -112,7 +112,7 @@ typedef double         f64;
 	}\
 	while (false)
 
-	#define DEBUG_once\
+	#define DEBUG_ONCE\
 	for (DEBUG_persist bool32 MACRO_CONCAT(DEBUG_ONCE_, __LINE__) = true; MACRO_CONCAT(DEBUG_ONCE_, __LINE__); MACRO_CONCAT(DEBUG_ONCE_, __LINE__) = false)
 
 	global const i64 DEBUG_PERFORMANCE_COUNTER_FREQUENCY =
@@ -177,7 +177,7 @@ typedef double         f64;
 	#define ASSERT(EXPRESSION)
 	#define DEBUG_HALT()
 	#define DEBUG_printf(FSTR, ...)
-	#define DEBUG_once                       if (true); else
+	#define DEBUG_ONCE                       if (true); else
 	#define DEBUG_PROFILER_create_group(...)
 	#define DEBUG_PROFILER_flush_group(...)
 	#define DEBUG_PROFILER_start(...)

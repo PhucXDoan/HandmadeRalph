@@ -278,15 +278,23 @@ procedure String flush(StringBuilder* builder)
 	u64 write_count = 0;
 	FOR_NODES(&builder->head)
 	{
-		memcpy(data + write_count, it->buffer, it->count);
-		write_count += it->count;
+		if (it->count)
+		{
+			memcpy(data + write_count, it->buffer, it->count);
+			write_count += it->count;
+			it->count    = 0;
+		}
+		else
+		{
+			ASSERT(write_count == builder->size);
+			break;
+		}
 	}
 
 	String result = { builder->size, data };
 
-	builder->size       = 0;
-	builder->head.count = 0;
-	builder->curr       = &builder->head;
+	builder->size = 0;
+	builder->curr = &builder->head;
 
 	return result;
 }
@@ -763,9 +771,9 @@ enum struct MetaTypeType
 	enumerator
 };
 
-struct MetaTypePtr
+struct MetaTypeRef
 {
-	MetaTypeType type;
+	MetaTypeType ref_type;
 	union
 	{
 		struct MetaTypeAtom*       atom;
@@ -784,7 +792,7 @@ struct MetaTypeAtom
 struct MetaTypeArray
 {
 	String             meta;
-	struct MetaTypePtr underlying_type;
+	struct MetaTypeRef underlying_type;
 	TokenNode*         capacity;
 };
 
@@ -827,7 +835,7 @@ struct MetaType
 struct MetaDeclaration
 {
 	String      meta;
-	MetaTypePtr underlying_type;
+	MetaTypeRef underlying_type;
 	String      name;
 	TokenNode*  assignment;
 };
@@ -1012,7 +1020,8 @@ procedure bool32 parse_container(MetaTypeContainer* container, Tokenizer* tokeni
 		}
 		else
 		{
-			*nil = allocate<MetaDeclarationNode>(arena);
+			*nil  = allocate<MetaDeclarationNode>(arena);
+			**nil = {};
 			if (!parse_declaration(&(*nil)->declaration, tokenizer, arena))
 			{
 				if (+container->name)
@@ -1084,7 +1093,7 @@ procedure bool32 parse_declaration(MetaDeclaration* declaration, Tokenizer* toke
 	if (is_reserved_symbol(token, '['))
 	{
 		{
-			MetaTypePtr array_type = { MetaTypeType::array, { .array = allocate<MetaTypeArray>(arena) } };
+			MetaTypeRef array_type = { MetaTypeType::array, { .array = allocate<MetaTypeArray>(arena) } };
 			*array_type.array            = { .underlying_type = declaration->underlying_type };
 			declaration->underlying_type = array_type;
 		}
@@ -1293,7 +1302,7 @@ int main()
 						PASS_ISTR(it->name)
 					);
 
-					if (+it->meta)
+					if (it->meta.data)
 					{
 						if (+enumerator.meta)
 						{
@@ -1304,6 +1313,11 @@ int main()
 							report(String("A member has a meta tag when the enumerator declaration does not."), &main_tokenizer);
 							return 1;
 						}
+					}
+					else
+					{
+						report(String("A member is missing a meta tag."), &main_tokenizer);
+						return 1;
 					}
 
 					appendf(meta_builder, " }");
@@ -1384,8 +1398,8 @@ int main()
 				if
 				(
 					!container.is_union
-					|| !container.declarations       || container.declarations->      declaration.underlying_type.type != MetaTypeType::container || container.declarations->declaration.underlying_type.container->is_union
-					|| !container.declarations->next || container.declarations->next->declaration.underlying_type.type != MetaTypeType::array
+					|| !container.declarations       || container.declarations->      declaration.underlying_type.ref_type != MetaTypeType::container || container.declarations->declaration.underlying_type.container->is_union
+					|| !container.declarations->next || container.declarations->next->declaration.underlying_type.ref_type != MetaTypeType::array
 				)
 				{
 					report(String("Invalid layout for meta operation."), &main_tokenizer);
@@ -1574,7 +1588,7 @@ int main()
 
 					appendf(meta_builder, "\n");
 
-					appendf(meta_builder, "struct %.*sPtr\n{\n\t%.*sType type;\n\tunion\n\t{\n", PASS_ISTR(file_name), PASS_ISTR(file_name));
+					appendf(meta_builder, "struct %.*sRef\n{\n\t%.*sType ref_type;\n\tunion\n\t{\n", PASS_ISTR(file_name), PASS_ISTR(file_name));
 					FOR_NODES(name_pairs)
 					{
 						appendf(meta_builder, "\t\tstruct %.*s* %.*s;\n", PASS_ISTR(it->container), PASS_ISTR(it->semantic));
@@ -1613,17 +1627,80 @@ int main()
 
 				{
 					appendf(meta_builder, "#pragma clang diagnostic push\n#pragma clang diagnostic ignored \"-Wunused-function\"\n");
+					appendf(meta_builder, "procedure constexpr %.*sRef ref(%.*s* x) { return { x->type, { .%.*s = &x->%.*s } }; }\n", PASS_ISTR(file_name), PASS_ISTR(file_name), PASS_ISTR(name_pairs->semantic), PASS_ISTR(name_pairs->semantic));
 					FOR_NODES(name_pairs)
 					{
-						appendf
-						(
-							meta_builder,
-							"procedure %.*s    widen(const %.*s& x) { return { %.*sType::%.*s, { .%.*s = x } }; }\n"
-							"procedure %.*sPtr widen(      %.*s* x) { return { %.*sType::%.*s, { .%.*s = x } }; }\n",
-							PASS_ISTR(file_name), PASS_ISTR(it->container), PASS_ISTR(file_name), PASS_ISTR(it->semantic), PASS_ISTR(it->semantic),
-							PASS_ISTR(file_name), PASS_ISTR(it->container), PASS_ISTR(file_name), PASS_ISTR(it->semantic), PASS_ISTR(it->semantic)
-						);
+						// @TODO@ Is `widen` good? It makes a copy to generalize a unit, but this could be done by accident, whena reference or pointer is meant.
+						#if 0
+						appendf(meta_builder, "procedure constexpr %.*s    widen(const %.*s& x) { return { %.*sType::%.*s, { .%.*s = x } }; }\n", PASS_ISTR(file_name), PASS_ISTR(it->container), PASS_ISTR(file_name), PASS_ISTR(it->semantic), PASS_ISTR(it->semantic));
+						#endif
+						appendf(meta_builder, "procedure constexpr %.*sRef ref(%.*s* x) { return { %.*sType::%.*s, { .%.*s = x } }; }\n", PASS_ISTR(file_name), PASS_ISTR(it->container), PASS_ISTR(file_name), PASS_ISTR(it->semantic), PASS_ISTR(it->semantic));
+						appendf(meta_builder, "procedure bool32 deref(%.*s** x, %.*s*   y) { *x = &y->%.*s; return y->type     == %.*sType::%.*s; }\n", PASS_ISTR(it->container), PASS_ISTR(file_name), PASS_ISTR(it->semantic), PASS_ISTR(file_name), PASS_ISTR(it->semantic));
+						appendf(meta_builder, "procedure bool32 deref(%.*s** x, %.*sRef y) { *x =  y. %.*s; return y. ref_type == %.*sType::%.*s; }\n", PASS_ISTR(it->container), PASS_ISTR(file_name), PASS_ISTR(it->semantic), PASS_ISTR(file_name), PASS_ISTR(it->semantic));
 					}
+
+					#if 0 // @NOTE@ Complex template procedure to swap variants easily.
+					appendf(meta_builder, "\n");
+					appendf(meta_builder, "template <typename A, typename B>\n");
+					appendf(meta_builder, "procedure bool32 pairing(A** a, B** b, %.*sRef& p, %.*sRef& q)\n", PASS_ISTR(file_name), PASS_ISTR(file_name));
+					appendf(meta_builder, "{\n");
+					constexpr char PAIR[2] = { 'A', 'B' };
+					FOR_ELEMS(pair, PAIR)
+					{
+						appendf(meta_builder, "\tconstexpr %.*sType %c_TYPE =\n", PASS_ISTR(file_name), *pair);
+						FOR_NODES(name_pairs)
+						{
+							appendf(meta_builder, "\t\tstd::is_same<%c, %.*s>::value ? %.*sType::%.*s :\n", *pair, PASS_ISTR(it->container), PASS_ISTR(file_name), PASS_ISTR(it->semantic));
+						}
+						appendf(meta_builder, "\t\t\t%.*sType::null;\n", PASS_ISTR(file_name));
+					}
+
+					appendf(meta_builder, "\tstatic_assert(A_TYPE != %.*sType::null, \":: Type was not recongize as part of the variant.\");\n", PASS_ISTR(file_name));
+					appendf(meta_builder, "\tif (p.ref_type == A_TYPE && q.ref_type == B_TYPE)\n");
+					appendf(meta_builder, "\t{\n");
+					appendf(meta_builder, "\t	*a = reinterpret_cast<A*>(p.%.*s);\n", PASS_ISTR(name_pairs->semantic));
+					appendf(meta_builder, "\t	*b = reinterpret_cast<B*>(q.%.*s);\n", PASS_ISTR(name_pairs->semantic));
+					appendf(meta_builder, "\t	return true;\n");
+					appendf(meta_builder, "\t}\n");
+					appendf(meta_builder, "\telse if (p.ref_type == B_TYPE && q.ref_type == A_TYPE)\n");
+					appendf(meta_builder, "\t{\n");
+					appendf(meta_builder, "\t	*a = reinterpret_cast<A*>(q.%.*s);\n", PASS_ISTR(name_pairs->semantic));
+					appendf(meta_builder, "\t	*b = reinterpret_cast<B*>(p.%.*s);\n", PASS_ISTR(name_pairs->semantic));
+					appendf(meta_builder, "\t	return true;\n");
+					appendf(meta_builder, "\t}\n");
+					appendf(meta_builder, "\treturn false;\n");
+					appendf(meta_builder, "}\n");
+
+					appendf(meta_builder, "template <typename A, typename B>\n");
+					appendf(meta_builder, "procedure bool32 pairing(A** a, B** b, %.*s* p, %.*s* q)\n", PASS_ISTR(file_name), PASS_ISTR(file_name));
+					appendf(meta_builder, "{\n");
+					FOR_ELEMS(pair, PAIR)
+					{
+						appendf(meta_builder, "\tconstexpr %.*sType %c_TYPE =\n", PASS_ISTR(file_name), *pair);
+						FOR_NODES(name_pairs)
+						{
+							appendf(meta_builder, "\t\tstd::is_same<%c, %.*s>::value ? %.*sType::%.*s :\n", *pair, PASS_ISTR(it->container), PASS_ISTR(file_name), PASS_ISTR(it->semantic));
+						}
+						appendf(meta_builder, "\t\t\t%.*sType::null;\n", PASS_ISTR(file_name));
+					}
+
+					appendf(meta_builder, "\tstatic_assert(A_TYPE != %.*sType::null, \":: Type was not recongize as part of the variant.\");\n", PASS_ISTR(file_name));
+					appendf(meta_builder, "\tif (p->type == A_TYPE && q->type == B_TYPE)\n");
+					appendf(meta_builder, "\t{\n");
+					appendf(meta_builder, "\t	*a = reinterpret_cast<A*>(&p->%.*s);\n", PASS_ISTR(name_pairs->semantic));
+					appendf(meta_builder, "\t	*b = reinterpret_cast<B*>(&q->%.*s);\n", PASS_ISTR(name_pairs->semantic));
+					appendf(meta_builder, "\t	return true;\n");
+					appendf(meta_builder, "\t}\n");
+					appendf(meta_builder, "\telse if (p->type == B_TYPE && q->type == A_TYPE)\n");
+					appendf(meta_builder, "\t{\n");
+					appendf(meta_builder, "\t	*a = reinterpret_cast<A*>(&q->%.*s);\n", PASS_ISTR(name_pairs->semantic));
+					appendf(meta_builder, "\t	*b = reinterpret_cast<B*>(&p->%.*s);\n", PASS_ISTR(name_pairs->semantic));
+					appendf(meta_builder, "\t	return true;\n");
+					appendf(meta_builder, "\t}\n");
+					appendf(meta_builder, "\treturn false;\n");
+					appendf(meta_builder, "}\n");
+					#endif
+
 					append(meta_builder, String("#pragma clang diagnostic pop\n"));
 				}
 
