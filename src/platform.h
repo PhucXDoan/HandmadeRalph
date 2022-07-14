@@ -128,4 +128,3 @@ extern  PlatformUpdate_t(PlatformUpdate  );
 #define PlatformSound_t(NAME) void NAME(PlatformSample* platform_sample_buffer, u64 platform_sample_count, i32 platform_samples_per_second, byte* platform_memory)
 typedef PlatformSound_t(PlatformSound_t);
 extern  PlatformSound_t(PlatformSound  );
-

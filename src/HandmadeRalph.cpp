@@ -30,13 +30,246 @@ struct Circle
 	f32 radius;
 };
 
+struct Rect
+{
+	vf2 dims;
+};
+
 struct RoundedRect
 {
 	vf2 dims;
 	f32 radius;
 };
 
-#include "META/variant/Shape.h" // @META@ Circle, RoundedRect
+#include "META/kind/Shape.h" // @META@ Circle, Rect, RoundedRect
+
+enum struct CollisionType : u8
+{
+	none,
+	collided,
+	embedded
+};
+
+struct CollisionResult
+{
+	CollisionType type;
+	vf2           displacement_delta;
+	vf2           normal;
+	f32           priority;
+};
+
+procedure bool32 prioritize_collision(CollisionResult* a, const CollisionResult& b)
+{
+	if (a->priority < b.priority)
+	{
+		*a = b;
+		return true;
+	}
+	else
+	{
+		return false;
+	}
+}
+
+procedure CollisionResult collide_side(vf2 displacement, vf2 center, vf2 normal)
+{
+	constexpr f32 EFFECTIVE_EMBEDDED_EPSILON     = 0.00001f;
+	constexpr f32 EFFECTIVE_INTERSECTION_EPSILON = 0.00001f;
+
+	f32 insideness = dot(center, normal);
+	if (insideness > EFFECTIVE_EMBEDDED_EPSILON)
+	{
+		return
+			{
+				.type               = CollisionType::embedded,
+				.displacement_delta = normal * insideness - displacement,
+				.normal             = normal,
+				.priority           = norm_sq(displacement) + insideness
+			};
+	}
+
+	f32 parallelness = dot(displacement, normal);
+	if (parallelness < -EFFECTIVE_INTERSECTION_EPSILON)
+	{
+		f32 scalar = insideness / parallelness;
+		if (scalar < 1.0f)
+		{
+			return
+				{
+					.type               = CollisionType::collided,
+					.displacement_delta = displacement * (scalar - 1.0f ),
+					.normal             = normal,
+					.priority           = norm_sq(displacement) * (1.0f - scalar)
+				};
+		}
+	}
+
+	return {};
+}
+
+procedure CollisionResult collide_line(vf2 displacement, vf2 center, vf2 normal, f32 thickness)
+{
+	vf2 plane_normal = normal * (dot(center, normal) > 0.0f ? -1.0f : 1.0f);
+	return collide_side(displacement, center + plane_normal * thickness / 2.0f, plane_normal);
+}
+
+procedure CollisionResult collide(vf2 displacement, vf2 center, Circle circle)
+{
+	constexpr f32 EFFECTIVE_EMBEDDED_EPSILON     = 0.00001f;
+	constexpr f32 EFFECTIVE_INTERSECTION_EPSILON = 0.00001f;
+	constexpr f32 CENTER_EPSILON                 = 0.00001f;
+
+	if (circle.radius > CENTER_EPSILON)
+	{
+		f32 norm_sq_displacement = norm_sq(displacement);
+		f32 norm_center          = norm(center);
+		if (fabsf(norm_center) <= CENTER_EPSILON)
+		{
+			return
+				{
+					.type               = CollisionType::embedded,
+					.displacement_delta = center + vf2 { circle.radius, 0.0f } - displacement,
+					.normal             = { 1.0f, 0.0f },
+					.priority           = norm_sq_displacement + circle.radius
+				};
+		}
+
+		vf2 neg_normalized_center = -center / norm_center;
+		f32 insideness            = circle.radius - norm_center;
+		if (insideness > EFFECTIVE_EMBEDDED_EPSILON)
+		{
+			return
+				{
+					.type               = CollisionType::embedded,
+					.displacement_delta = neg_normalized_center * insideness - displacement,
+					.normal             = neg_normalized_center,
+					.priority           = norm_sq_displacement + insideness
+				};
+		}
+
+		f32 parallelness = dot(displacement, neg_normalized_center);
+		if (parallelness < -EFFECTIVE_INTERSECTION_EPSILON)
+		{
+			f32 discriminant = norm_sq_displacement * circle.radius * circle.radius - square(displacement.y * center.x - displacement.x * center.y);
+			if (discriminant >= 0.0f)
+			{
+				f32 scalar = (dot(displacement, center) - sqrtf(discriminant)) / norm_sq_displacement;
+				if (scalar < 1.0f)
+				{
+					return
+						{
+							.type               = CollisionType::collided,
+							.displacement_delta = displacement * (scalar - 1.0f),
+							.normal             = normalize(displacement * scalar - center),
+							.priority           = norm_sq_displacement * (1.0f - scalar)
+						};
+				}
+			}
+		}
+	}
+
+	return {};
+}
+
+procedure CollisionResult collide(vf2 displacement, vf2 center, Rect rect)
+{
+	CollisionResult left_right = collide_line(displacement, center, { 1.0f, 0.0f }, rect.dims.x);
+	if
+	(
+		left_right.type != CollisionType::none &&
+		(
+			displacement.y + left_right.displacement_delta.y < center.y - rect.dims.y / 2.0f ||
+			displacement.y + left_right.displacement_delta.y > center.y + rect.dims.y / 2.0f
+		)
+	)
+	{
+		left_right = {};
+	}
+
+	CollisionResult bottom_top = collide_line(displacement, center, { 0.0f, 1.0f }, rect.dims.y);
+	if
+	(
+		bottom_top.type != CollisionType::none &&
+		(
+			displacement.x + bottom_top.displacement_delta.x < center.x - rect.dims.x / 2.0f ||
+			displacement.x + bottom_top.displacement_delta.x > center.x + rect.dims.x / 2.0f
+		)
+	)
+	{
+		bottom_top = {};
+	}
+
+	return
+		(left_right.type == CollisionType::embedded || bottom_top.type == CollisionType::embedded)
+			? left_right.priority < bottom_top.priority ? left_right : bottom_top
+			: left_right.priority > bottom_top.priority ? left_right : bottom_top;
+}
+
+procedure CollisionResult collide(vf2 displacement, vf2 center, RoundedRect rounded_rect)
+{
+	CollisionResult result = {};
+	prioritize_collision(&result, collide(displacement, center , Rect { .dims = { rounded_rect.dims.x + rounded_rect.radius * 2.0f, rounded_rect.dims.y } }));
+	prioritize_collision(&result, collide(displacement, center , Rect { .dims = { rounded_rect.dims.x, rounded_rect.dims.y + rounded_rect.radius * 2.0f } }));
+	prioritize_collision(&result, collide(displacement, center + rounded_rect.dims * vf2 { -0.5f, -0.5f }, Circle { .radius = rounded_rect.radius }  ));
+	prioritize_collision(&result, collide(displacement, center + rounded_rect.dims * vf2 {  0.5f, -0.5f }, Circle { .radius = rounded_rect.radius }  ));
+	prioritize_collision(&result, collide(displacement, center + rounded_rect.dims * vf2 { -0.5f,  0.5f }, Circle { .radius = rounded_rect.radius }  ));
+	prioritize_collision(&result, collide(displacement, center + rounded_rect.dims * vf2 {  0.5f,  0.5f }, Circle { .radius = rounded_rect.radius }  ));
+	return result;
+}
+
+procedure CollisionResult collide(vf2 displacement, ShapeRef a, vf2 b_center, ShapeRef b)
+{
+	if (a.ref_type <= b.ref_type)
+	{
+		switch (a.ref_type)
+		{
+			case ShapeType::Circle: switch (b.ref_type)
+			{
+				case ShapeType::Circle: return
+					collide(displacement, b_center, Circle { .radius = a.Circle_->radius + b.Circle_->radius });
+
+				case ShapeType::Rect: return
+					collide(displacement, b_center, RoundedRect { .dims = b.Rect_->dims, .radius = a.Circle_->radius });
+
+				case ShapeType::RoundedRect: return
+					collide(displacement, b_center, RoundedRect { .dims = b.Rect_->dims, .radius = a.Circle_->radius + b.RoundedRect_->radius });
+
+				case ShapeType::null : ASSERT(false); return {};
+			}
+
+			case ShapeType::Rect: switch (b.ref_type)
+			{
+				case ShapeType::Rect: return
+					collide(displacement, b_center, Rect { .dims = a.Rect_->dims + b.Rect_->dims });
+
+				case ShapeType::RoundedRect: return
+					collide(displacement, b_center, RoundedRect { .dims = a.Rect_->dims + b.RoundedRect_->dims, .radius = b.RoundedRect_->radius });
+
+				case ShapeType::Circle :
+				case ShapeType::null   : ASSERT(false); return {};
+			}
+
+			case ShapeType::RoundedRect: switch (b.ref_type)
+			{
+				case ShapeType::RoundedRect: return
+					collide(displacement, b_center, RoundedRect { a.RoundedRect_->dims + b.RoundedRect_->dims, b.RoundedRect_->radius + b.RoundedRect_->radius });
+
+				case ShapeType::Circle :
+				case ShapeType::Rect   :
+				case ShapeType::null   : ASSERT(false); return {};
+			}
+
+			case ShapeType::null : ASSERT(false); return {};
+		}
+	}
+	else
+	{
+		CollisionResult result = collide(-displacement, b, -b_center, a);
+		result.displacement_delta *= -1.0f;
+		result.normal             *= -1.0f;
+		return result;
+	}
+}
 
 enum struct MonstarFlag : u8
 {
@@ -51,9 +284,9 @@ struct Chunk;
 
 struct Tree
 {
-	vf2         rel_pos;
-	RoundedRect collider;
-	i32         bmp_index;
+	vf2  rel_pos;
+	Rect collider;
+	i32  bmp_index;
 };
 
 struct Hero
@@ -111,7 +344,7 @@ struct PressurePlate
 	bool32 down;
 };
 
-#include "META/variant/Entity.h" // @META@ Tree, Hero, Pet, Monstar, Rock, PressurePlate
+#include "META/kind/Entity.h" // @META@ Tree, Hero, Pet, Monstar, Rock, PressurePlate
 
 struct Chunk
 {
@@ -238,197 +471,6 @@ procedure void draw_circle(PlatformFramebuffer* platform_framebuffer, vi2 pos, i
 	}
 }
 
-global constexpr f32 COLLISION_EPSILON = 0.000001f;
-
-enum struct CollisionType : u8
-{
-	none,
-	collided,
-	embedded
-};
-
-struct CollisionResult
-{
-	CollisionType type;
-	vf2           new_displacement;
-	vf2           normal;
-	f32           priority;
-};
-
-procedure const CollisionResult& prioritize_collision_results(const CollisionResult& a, const CollisionResult& b)
-{
-	return b.type == CollisionType::none || (a.type != CollisionType::none && a.priority > b.priority)
-		? a
-		: b;
-}
-
-procedure bool32 prioritize_collision_results(CollisionResult* a, const CollisionResult& b)
-{
-	if (b.type == CollisionType::none || (a->type != CollisionType::none && a->priority > b.priority))
-	{
-		return false;
-	}
-	else
-	{
-		*a = b;
-		return true;
-	}
-}
-
-procedure CollisionResult collide_against_plane(vf2 displacement, vf2 plane_center, vf2 plane_normal)
-{
-	f32 inside_amount       = dot(plane_normal, plane_center);
-	f32 intersection_scalar = inside_amount / dot(plane_normal, displacement);
-	if (inside_amount < 0.0f && IN_RANGE(intersection_scalar, 0.0f, 1.0f))
-	{
-		return
-			{
-				.type             = CollisionType::collided,
-				.new_displacement = displacement * intersection_scalar,
-				.normal           = plane_normal,
-				.priority         = -intersection_scalar
-			};
-	}
-	else if (inside_amount < 0.0f || (inside_amount <= COLLISION_EPSILON && dot(displacement, plane_normal) >= -COLLISION_EPSILON))
-	{
-		return {};
-	}
-	else
-	{
-		return
-			{
-				.type             = CollisionType::embedded,
-				.new_displacement = plane_normal * inside_amount,
-				.normal           = plane_normal,
-				.priority         = inside_amount
-			};
-	}
-}
-
-procedure CollisionResult collide_against_line(vf2 displacement, vf2 line_center, vf2 line_normal, f32 padding)
-{
-	vf2 plane_normal = line_normal * (dot(line_center, line_normal) > 0.0f ? -1.0f : 1.0f);
-	return collide_against_plane(displacement, line_center + plane_normal * padding, plane_normal);
-}
-
-// @TODO@ Bugs out on `radius == 0.0f`
-// @TODO@ Should detect collision still when the center is on the origin.
-procedure CollisionResult collide_against_circle(vf2 displacement, vf2 center, f32 radius)
-{
-	f32 distance_from_center    = norm(center);
-	f32 amount_away_from_center = -dot(center, displacement);
-
-	if (distance_from_center < COLLISION_EPSILON)
-	{
-		return {};
-	}
-
-	if (distance_from_center > radius)
-	{
-		f32 norm_sq_displacement = norm_sq(displacement);
-		if (norm_sq_displacement >= COLLISION_EPSILON)
-		{
-			f32 discriminant = square(amount_away_from_center) - norm_sq_displacement * (square(distance_from_center) - square(radius));
-			if (discriminant >= COLLISION_EPSILON)
-			{
-				f32 intersection_scalar = -(amount_away_from_center + sqrtf(discriminant)) / norm_sq_displacement;
-				if (IN_RANGE(intersection_scalar, 0.0f, 1.0f))
-				{
-					return
-						{
-							.type             = CollisionType::collided,
-							.new_displacement = displacement * intersection_scalar,
-							.normal           = -center / distance_from_center,
-							.priority         = -intersection_scalar
-						};
-				}
-			}
-		}
-	}
-
-	if (distance_from_center > radius || (radius - distance_from_center < COLLISION_EPSILON && amount_away_from_center >= 0.0f))
-	{
-		return {};
-	}
-	else
-	{
-		return
-			{
-				.type             = CollisionType::embedded,
-				.new_displacement = -center * (radius / distance_from_center - 1.0f),
-				.normal           = -center / distance_from_center,
-				.priority         = radius - distance_from_center
-			};
-	}
-}
-
-procedure CollisionResult collide_against_rounded_rect(vf2 displacement, vf2 rect_bottom_left, vf2 rect_dims, f32 radius)
-{
-	CollisionResult left_right = collide_against_line(displacement, rect_bottom_left + vf2 { rect_dims.x / 2.0f, 0.0f }, { 1.0f, 0.0f }, rect_dims.x / 2.0f + radius);
-	if (left_right.type != CollisionType::none && !IN_RANGE(left_right.new_displacement.y - rect_bottom_left.y, 0.0f, rect_dims.y))
-	{
-		left_right.type = CollisionType::none;
-	}
-	CollisionResult bottom_top = collide_against_line(displacement, rect_bottom_left + vf2 { 0.0f, rect_dims.y / 2.0f }, { 0.0f, 1.0f }, rect_dims.y / 2.0f + radius);
-	if (bottom_top.type != CollisionType::none && !IN_RANGE(bottom_top.new_displacement.x - rect_bottom_left.x, 0.0f, rect_dims.x))
-	{
-		bottom_top.type = CollisionType::none;
-	}
-
-	return
-		prioritize_collision_results
-		(
-			prioritize_collision_results(bottom_top, left_right),
-			prioritize_collision_results
-			(
-				prioritize_collision_results(collide_against_circle(displacement, rect_bottom_left                            , radius), collide_against_circle(displacement, rect_bottom_left + vf2 { rect_dims.x, 0.0f }, radius)),
-				prioritize_collision_results(collide_against_circle(displacement, rect_bottom_left + vf2 { 0.0f, rect_dims.y }, radius), collide_against_circle(displacement, rect_bottom_left +       rect_dims          , radius))
-			)
-		);
-}
-
-procedure CollisionResult collide(vf2 displacement, ShapeRef a, vf2 pos, ShapeRef b)
-{
-	if (a.ref_type <= b.ref_type)
-	{
-		switch (a.ref_type)
-		{
-			case ShapeType::Circle: switch (b.ref_type)
-			{
-				case ShapeType::Circle: return
-					collide_against_circle(displacement, pos, a.Circle_->radius + b.Circle_->radius);
-
-				case ShapeType::RoundedRect: return
-					collide_against_rounded_rect(displacement, pos, b.RoundedRect_->dims, b.RoundedRect_->radius + a.Circle_->radius);
-
-				case ShapeType::null : ASSERT(false); return {};
-			}
-
-			case ShapeType::RoundedRect: switch (b.ref_type)
-			{
-				case ShapeType::RoundedRect: return
-					collide_against_rounded_rect(displacement, pos, a.RoundedRect_->dims + b.RoundedRect_->dims, b.RoundedRect_->radius + b.RoundedRect_->radius);
-
-				case ShapeType::Circle :
-				case ShapeType::null   : ASSERT(false); return {};
-			}
-
-			case ShapeType::null : ASSERT(false); return {};
-		}
-	}
-	else
-	{
-		CollisionResult result = collide(-displacement, b, -pos, a);
-		return
-			{
-				.type             =  result.type,
-				.new_displacement = -result.new_displacement,
-				.normal           = -result.normal,
-				.priority         =  result.priority
-			};
-	}
-}
-
 procedure Chunk* get_chunk(State* state, vi2 coords)
 {
 	// @TODO@ Better hash function...
@@ -532,7 +574,7 @@ procedure void process_move(EntityRef entity, State* state, f32 delta_time)
 			{
 				if
 				(
-					prioritize_collision_results
+					prioritize_collision
 					(
 						&collision,
 						collide
@@ -562,7 +604,7 @@ procedure void process_move(EntityRef entity, State* state, f32 delta_time)
 				if
 				(
 					IMPLIES(deref(&entity_rock, entity), entity_rock != rock) &&
-					prioritize_collision_results
+					prioritize_collision
 					(
 						&collision,
 						collide
@@ -588,7 +630,7 @@ procedure void process_move(EntityRef entity, State* state, f32 delta_time)
 		{
 			if
 			(
-				prioritize_collision_results
+				prioritize_collision
 				(
 					&collision,
 					collide
@@ -613,7 +655,7 @@ procedure void process_move(EntityRef entity, State* state, f32 delta_time)
 		{
 			if
 			(
-				prioritize_collision_results
+				prioritize_collision
 				(
 					&collision,
 					collide
@@ -638,7 +680,7 @@ procedure void process_move(EntityRef entity, State* state, f32 delta_time)
 		(
 			state->monstar.existence_t > 0.0f
 			&& entity.ref_type != EntityType::Monstar
-			&& prioritize_collision_results
+			&& prioritize_collision
 				(
 					&collision,
 					collide
@@ -661,9 +703,7 @@ procedure void process_move(EntityRef entity, State* state, f32 delta_time)
 		state->pressure_plate.down =
 			collide
 			(
-				collision.type == CollisionType::none
-					? displacement.xy
-					: collision.new_displacement,
+				displacement.xy + collision.displacement_delta,
 				ref(&state->pressure_plate.collider),
 				(state->hero.chunk->coords - state->pressure_plate.chunk->coords) * METERS_PER_CHUNK + state->hero.rel_pos.xy - state->pressure_plate.rel_pos,
 				ref(&state->hero.collider)
@@ -717,10 +757,7 @@ procedure void process_move(EntityRef entity, State* state, f32 delta_time)
 			}
 		}
 
-		rel_pos->xy +=
-			collision.type == CollisionType::none
-				? displacement.xy
-				: collision.new_displacement;
+		rel_pos->xy += displacement.xy + collision.displacement_delta;
 
 		vi2 delta_coords = { 0, 0 };
 		if      (rel_pos->x <              0.0f) { delta_coords.x -= 1; }
@@ -754,13 +791,22 @@ procedure void process_move(EntityRef entity, State* state, f32 delta_time)
 		{
 			if (entity.ref_type == EntityType::Rock)
 			{
-				vel->xy         = 0.15f * (dot(vel->xy         - collision.new_displacement, rotate90(collision.normal)) * rotate90(collision.normal) * 2.0f + (collision.new_displacement - vel->xy        ));
-				displacement.xy = 0.15f * (dot(displacement.xy - collision.new_displacement, rotate90(collision.normal)) * rotate90(collision.normal) * 2.0f + (collision.new_displacement - displacement.xy));
+				constexpr f32 REFLECT_K = 0.15f;
+				vel->xy         = complex_mul(vel->xy - displacement.xy - collision.displacement_delta, conjugate(collision.normal));
+				vel->x          = REFLECT_K * fabsf(vel->x);
+				vel->xy         = complex_mul(vel->xy, collision.normal);
+				displacement.xy = complex_mul(-collision.displacement_delta, conjugate(collision.normal));
+				displacement.x  = REFLECT_K * fabsf(displacement.x);
+				displacement.xy = complex_mul(displacement.xy, collision.normal);
 			}
 			else
 			{
-				vel->xy         = dot(vel->xy         - collision.new_displacement, rotate90(collision.normal)) * rotate90(collision.normal) + max(dot(vel->xy         - collision.new_displacement, collision.normal), 0.0f) * collision.normal;
-				displacement.xy = dot(displacement.xy - collision.new_displacement, rotate90(collision.normal)) * rotate90(collision.normal) + max(dot(displacement.xy - collision.new_displacement, collision.normal), 0.0f) * collision.normal;
+				vel->xy         = complex_mul(vel->xy - displacement.xy - collision.displacement_delta, conjugate(collision.normal));
+				vel->x          = max(vel->x, 0.0f);
+				vel->xy         = complex_mul(vel->xy, collision.normal);
+				displacement.xy = complex_mul(-collision.displacement_delta, conjugate(collision.normal));
+				displacement.x  = max(displacement.x, 0.0f);
+				displacement.xy = complex_mul(displacement.xy, collision.normal);
 			}
 
 			displacement.z  = 0.0f;
@@ -884,11 +930,7 @@ extern PlatformUpdate_t(PlatformUpdate)
 				chunk->tree_buffer[chunk->tree_count] =
 					{
 						.rel_pos  = vxx(rng(&state->seed, 0, static_cast<i32>(METERS_PER_CHUNK)), rng(&state->seed, 0, static_cast<i32>(METERS_PER_CHUNK - 1))),
-						.collider =
-							{
-								.dims   = { 1.0f, 1.0f },
-								.radius = 0.0f // @TODO@ Rect shape type.
-							},
+						.collider = { .dims = { 1.0f, 1.0f } },
 						.bmp_index = rng(&state->seed, 0, ARRAY_CAPACITY(state->bmp.trees))
 					};
 				chunk->tree_count += 1;
@@ -918,7 +960,7 @@ extern PlatformUpdate_t(PlatformUpdate)
 				.chunk    = get_chunk(state, { 0, 0 }),
 				.rel_pos  = { 7.0f, 9.0f, 0.0f },
 				.collider = { .radius = 0.3f },
-				.hp = 3
+				.hp       = 3
 			};
 
 
@@ -1215,11 +1257,11 @@ extern PlatformUpdate_t(PlatformUpdate)
 				draw_rect
 				(
 					platform_framebuffer,
-					screen_coords_of(chunk_node->chunk.coords, vxn(tree->rel_pos, 0.0f)),
+					screen_coords_of(chunk_node->chunk.coords, vxn(tree->rel_pos - tree->collider.dims / 2.0f, 0.0f)),
 					vxx(tree->collider.dims * PIXELS_PER_METER),
 					rgba_from(0.25f, 0.825f, 0.4f)
 				);
-				draw_thing(chunk_node->chunk.coords, vxn(tree->rel_pos + tree->collider.dims / 2.0f, 0.0f), { 0.5f, 0.3f }, &state->bmp.trees[tree->bmp_index]);
+				//draw_thing(chunk_node->chunk.coords, vxn(tree->rel_pos, 0.0f), { 0.5f, 0.3f }, &state->bmp.trees[tree->bmp_index]);
 			}
 		}
 	}

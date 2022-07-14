@@ -252,9 +252,12 @@ procedure TYPE* allocate(MemoryArena* arena, const u64& count = 1)
 // Math.
 //
 
-#define PASS_V2(V) (V).x, (V).y
-#define PASS_V3(V) (V).x, (V).y, (V).z
-#define PASS_V4(V) (V).x, (V).y, (V).z, (V).w
+#define PASS_V2( V) (V).x, (V).y
+#define PASS_V3( V) (V).x, (V).y, (V).z
+#define PASS_V4( V) (V).x, (V).y, (V).z, (V).w
+#define PASS_VD2(V) static_cast<f64>((V).x), static_cast<f64>((V).y)
+#define PASS_VD3(V) static_cast<f64>((V).x), static_cast<f64>((V).y), static_cast<f64>((V).z)
+#define PASS_VD4(V) static_cast<f64>((V).x), static_cast<f64>((V).y), static_cast<f64>((V).z), static_cast<f64>((V).w)
 
 global constexpr f32 TAU   = 6.28318530717f;
 global constexpr f32 SQRT2 = 1.41421356237f;
@@ -547,6 +550,11 @@ procedure constexpr i32 mod(const i32& x, const i32& m) { return (x % m + m) % m
 procedure           f32 mod(const f32& x, const f32& m) { f32 y = fmodf(x, m); return y < 0.0f ? y + m : y; }
 
 procedure f32 atan2(const vf2& v) { return atan2f(v.y, v.x); }
+
+procedure constexpr vf2 complex_mul(const vf2& a, const vf2& b)
+{
+	return { a.x * b.x - a.y * b.y, a.x * b.y + a.y * b.x };
+}
 
 //
 // Strings.

@@ -1480,7 +1480,7 @@ int main()
 					return 1;
 				}
 			}
-			else if (meta_operation == String("variant"))
+			else if (meta_operation == String("kind"))
 			{
 				bool32 is_forwarded = starts_with(file_extension, String(".forward"));
 				String forwarded_file_path;
@@ -1611,7 +1611,7 @@ int main()
 					appendf(meta_builder, "procedure constexpr %.*sRef ref(%.*s* x) { return { x->type, { .%.*s_ = &x->%.*s_ } }; }\n", PASS_ISTR(file_name), PASS_ISTR(file_name), PASS_ISTR(members->str), PASS_ISTR(members->str));
 					FOR_NODES(members)
 					{
-						// @TODO@ If a member is used in two different variants, there will be ambiguity as to what variant to widen to or to make a ref as.
+						// @TODO@ If a member is used in two different kinds, there will be ambiguity as to what kind to widen to or to make a ref as.
 						appendf(meta_builder, "procedure constexpr %.*s widen(const %.*s& x) { return { %.*sType::%.*s, { .%.*s_ = x } }; }\n", PASS_ISTR(file_name), PASS_ISTR(it->str), PASS_ISTR(file_name), PASS_ISTR(it->str), PASS_ISTR(it->str));
 						appendf(meta_builder, "procedure constexpr %.*sRef ref(%.*s* x) { return { %.*sType::%.*s, { .%.*s_ = x } }; }\n", PASS_ISTR(file_name), PASS_ISTR(it->str), PASS_ISTR(file_name), PASS_ISTR(it->str), PASS_ISTR(it->str));
 						appendf(meta_builder, "procedure bool32 deref(%.*s** x, %.*s*   y) { *x = &y->%.*s_; return y->type     == %.*sType::%.*s; }\n", PASS_ISTR(it->str), PASS_ISTR(file_name), PASS_ISTR(it->str), PASS_ISTR(file_name), PASS_ISTR(it->str));
