@@ -43,7 +43,7 @@ struct RoundedRect
 
 #include "META/kind/Shape.h" // @META@ Circle, Rect, RoundedRect
 
-enum struct CollisionType : u8
+enum struct CollisionResultType : u8
 {
 	none,
 	collided,
@@ -52,10 +52,10 @@ enum struct CollisionType : u8
 
 struct CollisionResult
 {
-	CollisionType type;
-	vf2           displacement_delta;
-	vf2           normal;
-	f32           priority;
+	CollisionResultType type;
+	vf2                 displacement_delta;
+	vf2                 normal;
+	f32                 priority;
 };
 
 procedure bool32 prioritize_collision(CollisionResult* a, const CollisionResult& b)
@@ -81,7 +81,7 @@ procedure CollisionResult collide_side(vf2 displacement, vf2 center, vf2 normal)
 	{
 		return
 			{
-				.type               = CollisionType::embedded,
+				.type               = CollisionResultType::embedded,
 				.displacement_delta = normal * insideness - displacement,
 				.normal             = normal,
 				.priority           = norm_sq(displacement) + insideness
@@ -96,7 +96,7 @@ procedure CollisionResult collide_side(vf2 displacement, vf2 center, vf2 normal)
 		{
 			return
 				{
-					.type               = CollisionType::collided,
+					.type               = CollisionResultType::collided,
 					.displacement_delta = displacement * (scalar - 1.0f ),
 					.normal             = normal,
 					.priority           = norm_sq(displacement) * (1.0f - scalar)
@@ -127,7 +127,7 @@ procedure CollisionResult collide(vf2 displacement, vf2 center, Circle circle)
 		{
 			return
 				{
-					.type               = CollisionType::embedded,
+					.type               = CollisionResultType::embedded,
 					.displacement_delta = center + vf2 { circle.radius, 0.0f } - displacement,
 					.normal             = { 1.0f, 0.0f },
 					.priority           = norm_sq_displacement + circle.radius
@@ -140,7 +140,7 @@ procedure CollisionResult collide(vf2 displacement, vf2 center, Circle circle)
 		{
 			return
 				{
-					.type               = CollisionType::embedded,
+					.type               = CollisionResultType::embedded,
 					.displacement_delta = neg_normalized_center * insideness - displacement,
 					.normal             = neg_normalized_center,
 					.priority           = norm_sq_displacement + insideness
@@ -158,7 +158,7 @@ procedure CollisionResult collide(vf2 displacement, vf2 center, Circle circle)
 				{
 					return
 						{
-							.type               = CollisionType::collided,
+							.type               = CollisionResultType::collided,
 							.displacement_delta = displacement * (scalar - 1.0f),
 							.normal             = normalize(displacement * scalar - center),
 							.priority           = norm_sq_displacement * (1.0f - scalar)
@@ -176,7 +176,7 @@ procedure CollisionResult collide(vf2 displacement, vf2 center, Rect rect)
 	CollisionResult left_right = collide_line(displacement, center, { 1.0f, 0.0f }, rect.dims.x);
 	if
 	(
-		left_right.type != CollisionType::none &&
+		left_right.type != CollisionResultType::none &&
 		(
 			displacement.y + left_right.displacement_delta.y < center.y - rect.dims.y / 2.0f ||
 			displacement.y + left_right.displacement_delta.y > center.y + rect.dims.y / 2.0f
@@ -189,7 +189,7 @@ procedure CollisionResult collide(vf2 displacement, vf2 center, Rect rect)
 	CollisionResult bottom_top = collide_line(displacement, center, { 0.0f, 1.0f }, rect.dims.y);
 	if
 	(
-		bottom_top.type != CollisionType::none &&
+		bottom_top.type != CollisionResultType::none &&
 		(
 			displacement.x + bottom_top.displacement_delta.x < center.x - rect.dims.x / 2.0f ||
 			displacement.x + bottom_top.displacement_delta.x > center.x + rect.dims.x / 2.0f
@@ -200,7 +200,7 @@ procedure CollisionResult collide(vf2 displacement, vf2 center, Rect rect)
 	}
 
 	return
-		(left_right.type == CollisionType::embedded || bottom_top.type == CollisionType::embedded)
+		(left_right.type == CollisionResultType::embedded || bottom_top.type == CollisionResultType::embedded)
 			? left_right.priority < bottom_top.priority ? left_right : bottom_top
 			: left_right.priority > bottom_top.priority ? left_right : bottom_top;
 }
@@ -217,42 +217,42 @@ procedure CollisionResult collide(vf2 displacement, vf2 center, RoundedRect roun
 	return result;
 }
 
-procedure CollisionResult collide(vf2 displacement, ShapeRef a, vf2 b_center, ShapeRef b)
+procedure CollisionResult collide(vf2 displacement, Shape a, vf2 b_center, Shape b)
 {
-	if (a.ref_type <= b.ref_type)
+	if (a.type <= b.type)
 	{
-		switch (a.ref_type)
+		switch (a.type)
 		{
-			case ShapeType::Circle: switch (b.ref_type)
+			case ShapeType::Circle: switch (b.type)
 			{
 				case ShapeType::Circle: return
-					collide(displacement, b_center, Circle { .radius = a.Circle_->radius + b.Circle_->radius });
+					collide(displacement, b_center, Circle { .radius = a.Circle_.radius + b.Circle_.radius });
 
 				case ShapeType::Rect: return
-					collide(displacement, b_center, RoundedRect { .dims = b.Rect_->dims, .radius = a.Circle_->radius });
+					collide(displacement, b_center, RoundedRect { .dims = b.Rect_.dims, .radius = a.Circle_.radius });
 
 				case ShapeType::RoundedRect: return
-					collide(displacement, b_center, RoundedRect { .dims = b.Rect_->dims, .radius = a.Circle_->radius + b.RoundedRect_->radius });
+					collide(displacement, b_center, RoundedRect { .dims = b.Rect_.dims, .radius = a.Circle_.radius + b.RoundedRect_.radius });
 
 				case ShapeType::null : ASSERT(false); return {};
 			}
 
-			case ShapeType::Rect: switch (b.ref_type)
+			case ShapeType::Rect: switch (b.type)
 			{
 				case ShapeType::Rect: return
-					collide(displacement, b_center, Rect { .dims = a.Rect_->dims + b.Rect_->dims });
+					collide(displacement, b_center, Rect { .dims = a.Rect_.dims + b.Rect_.dims });
 
 				case ShapeType::RoundedRect: return
-					collide(displacement, b_center, RoundedRect { .dims = a.Rect_->dims + b.RoundedRect_->dims, .radius = b.RoundedRect_->radius });
+					collide(displacement, b_center, RoundedRect { .dims = a.Rect_.dims + b.RoundedRect_.dims, .radius = b.RoundedRect_.radius });
 
 				case ShapeType::Circle :
 				case ShapeType::null   : ASSERT(false); return {};
 			}
 
-			case ShapeType::RoundedRect: switch (b.ref_type)
+			case ShapeType::RoundedRect: switch (b.type)
 			{
 				case ShapeType::RoundedRect: return
-					collide(displacement, b_center, RoundedRect { a.RoundedRect_->dims + b.RoundedRect_->dims, b.RoundedRect_->radius + b.RoundedRect_->radius });
+					collide(displacement, b_center, RoundedRect { a.RoundedRect_.dims + b.RoundedRect_.dims, b.RoundedRect_.radius + b.RoundedRect_.radius });
 
 				case ShapeType::Circle :
 				case ShapeType::Rect   :
@@ -291,14 +291,16 @@ struct Tree
 
 struct Hero
 {
-	Chunk*   chunk;
-	vf3      rel_pos;
-	vf3      vel;
-	Circle   collider;
-	Cardinal cardinal;
-	i32      hp;
-	f32      rock_throw_t;
-	f32      hit_t;
+	Chunk*        chunk;
+	vf3           rel_pos;
+	vf3           vel;
+	f32           level_z;
+	Circle        collider;
+	Cardinal      cardinal;
+	i32           hp;
+	f32           rock_throw_t;
+	f32           hit_t;
+	struct Stair* on_stair;
 };
 
 struct Pet
@@ -344,7 +346,16 @@ struct PressurePlate
 	bool32 down;
 };
 
-#include "META/kind/Entity.h" // @META@ Tree, Hero, Pet, Monstar, Rock, PressurePlate
+struct Stair
+{
+	Chunk* chunk;
+	vf2    rel_pos;
+	vf2    dims;
+	f32    rail_width;
+	f32    height;
+};
+
+#include "META/kind/Entity.h" // @META@ Tree, Hero, Pet, Monstar, Rock, PressurePlate, Stair
 
 struct Chunk
 {
@@ -392,6 +403,7 @@ struct State
 	Rock          rock_buffer[16];
 	i32           rock_count;
 	PressurePlate pressure_plate;
+	Stair         stair;
 
 	vi2           camera_coords;
 	vf2           camera_rel_pos;
@@ -527,7 +539,7 @@ procedure void process_move(EntityRef entity, State* state, f32 delta_time)
 	Chunk**  chunk    = 0;
 	vf3*     rel_pos  = 0;
 	vf3*     vel      = 0;
-	ShapeRef collider = {};
+	Shape    collider = {};
 
 	switch (entity.ref_type)
 	{
@@ -537,7 +549,7 @@ procedure void process_move(EntityRef entity, State* state, f32 delta_time)
 			chunk    = &entity.TYPE##_->chunk;\
 			rel_pos  = &entity.TYPE##_->rel_pos;\
 			vel      = &entity.TYPE##_->vel;\
-			collider = ref(&entity.TYPE##_->collider);\
+			collider = widen(entity.TYPE##_->collider);\
 		} break\
 
 		GRAB(Hero);
@@ -548,172 +560,397 @@ procedure void process_move(EntityRef entity, State* state, f32 delta_time)
 
 		case EntityType::null          :
 		case EntityType::Tree          :
+		case EntityType::Stair         :
 		case EntityType::PressurePlate : return;
 	}
 
-	vel->z += GRAVITY * delta_time;
-
-	vf3 displacement = *vel * delta_time;
+	f32 remaining_delta_time = delta_time;
 
 	// @TODO@ Better performing collision.
 	FOR_RANGE(8)
 	{
-		CollisionResult collision        = {};
-		EntityRef       collision_entity = {};
-
-		//
-		// Collide against trees.
-		//
-
-		// @TODO@ This checks chunks in a 3x3 adjacenct fashion. Could be better.
-		FOR_RANGE(i, 9)
+		if (remaining_delta_time == 0.0f)
 		{
-			Chunk* tree_chunk = get_chunk(state, (*chunk)->coords + vi2 { i % 3 - 1, i / 3 - 1 });
+			break;
+		}
 
-			FOR_ELEMS(tree, tree_chunk->tree_buffer, tree_chunk->tree_count)
+		f32 level_z = 0.0f;
+
+		enum struct CollisionType : u8
+		{
+			null,
+			xy,
+			level
+		};
+
+		struct Collision
+		{
+			CollisionType type;
+			vf3           normal;
+			f32           delta_time_delta;
+			EntityRef     entity;
+		};
+
+		Collision collision = {};
+
+		{
+			//
+			// Z-level processing.
+			//
+
+			CollisionResult collision_result = {};
+			EntityRef       collision_entity = {};
+
+	#if 0
+			Stair* stair_below = 0;
+
+			{
+				prioritize_collision
+				(
+					&collision_result,
+					collide
+					(
+						displacement.xy,
+						collider,
+						(state->stair.chunk->coords - (*chunk)->coords) * METERS_PER_CHUNK + state->stair.rel_pos + vf2 { (-state->stair.dims.x + state->stair.rail_width) / 2.0f, 0.0f } - rel_pos->xy,
+						widen(Rect { .dims = { state->stair.rail_width, state->stair.dims.y } })
+					)
+				);
+
+				prioritize_collision
+				(
+					&collision_result,
+					collide
+					(
+						displacement.xy,
+						collider,
+						(state->stair.chunk->coords - (*chunk)->coords) * METERS_PER_CHUNK + state->stair.rel_pos + vf2 { ( state->stair.dims.x - state->stair.rail_width) / 2.0f, 0.0f } - rel_pos->xy,
+						widen(Rect { .dims = { state->stair.rail_width, state->stair.dims.y } })
+					)
+				);
+			}
+	#endif
+
+			//
+			// Collide against trees.
+			//
+
+			// @TODO@ This checks chunks in a 3x3 adjacenct fashion. Could be better.
+			FOR_RANGE(i, 9)
+			{
+				Chunk* tree_chunk = get_chunk(state, (*chunk)->coords + vi2 { i % 3 - 1, i / 3 - 1 });
+
+				FOR_ELEMS(tree, tree_chunk->tree_buffer, tree_chunk->tree_count)
+				{
+					if
+					(
+						prioritize_collision
+						(
+							&collision_result,
+							collide
+							(
+								vel->xy * remaining_delta_time,
+								collider,
+								(tree_chunk->coords - (*chunk)->coords) * METERS_PER_CHUNK + tree->rel_pos - rel_pos->xy,
+								widen(tree->collider)
+							)
+						)
+					)
+					{
+						collision_entity = ref(tree);
+					}
+				}
+			}
+
+			//
+			// Collide against rocks.
+			//
+
+			if (entity.ref_type != EntityType::Hero)
+			{
+				FOR_ELEMS(rock, state->rock_buffer, state->rock_count)
+				{
+					Rock* entity_rock;
+					if
+					(
+						IMPLIES(deref(&entity_rock, entity), entity_rock != rock) &&
+						prioritize_collision
+						(
+							&collision_result,
+							collide
+							(
+								vel->xy * remaining_delta_time,
+								collider,
+								(rock->chunk->coords - (*chunk)->coords) * METERS_PER_CHUNK + rock->rel_pos.xy - rel_pos->xy,
+								widen(rock->collider)
+							)
+						)
+					)
+					{
+						collision_entity = ref(rock);
+					}
+				}
+			}
+
+			//
+			// Collide against hero.
+			//
+
+			if (entity.ref_type != EntityType::Hero && entity.ref_type != EntityType::Rock)
 			{
 				if
 				(
 					prioritize_collision
 					(
-						&collision,
+						&collision_result,
 						collide
 						(
-							displacement.xy,
+							vel->xy * remaining_delta_time,
 							collider,
-							(tree_chunk->coords - (*chunk)->coords) * METERS_PER_CHUNK + tree->rel_pos - rel_pos->xy,
-							ref(&tree->collider)
+							(state->hero.chunk->coords - (*chunk)->coords) * METERS_PER_CHUNK + state->hero.rel_pos.xy - rel_pos->xy,
+							widen(state->hero.collider)
 						)
 					)
 				)
 				{
-					collision_entity = ref(tree);
+					collision_entity = ref(&state->hero);
 				}
 			}
-		}
 
-		//
-		// Collide against rocks.
-		//
+			//
+			// Collide against pet.
+			//
 
-		if (entity.ref_type != EntityType::Hero)
-		{
-			FOR_ELEMS(rock, state->rock_buffer, state->rock_count)
+			if (entity.ref_type != EntityType::Pet)
 			{
-				Rock* entity_rock;
 				if
 				(
-					IMPLIES(deref(&entity_rock, entity), entity_rock != rock) &&
 					prioritize_collision
 					(
-						&collision,
+						&collision_result,
 						collide
 						(
-							displacement.xy,
+							vel->xy * remaining_delta_time,
 							collider,
-							(rock->chunk->coords - (*chunk)->coords) * METERS_PER_CHUNK + rock->rel_pos.xy - rel_pos->xy,
-							ref(&rock->collider)
+							(state->pet.chunk->coords - (*chunk)->coords) * METERS_PER_CHUNK + state->pet.rel_pos.xy - rel_pos->xy,
+							widen(state->pet.collider)
 						)
 					)
 				)
 				{
-					collision_entity = ref(rock);
+					collision_entity = ref(&state->pet);
 				}
 			}
-		}
 
-		//
-		// Collide against hero.
-		//
+			//
+			// Collide against monstar.
+			//
 
-		if (entity.ref_type != EntityType::Hero && entity.ref_type != EntityType::Rock)
-		{
 			if
 			(
-				prioritize_collision
-				(
-					&collision,
-					collide
+				state->monstar.existence_t > 0.0f
+				&& entity.ref_type != EntityType::Monstar
+				&& prioritize_collision
 					(
-						displacement.xy,
-						collider,
-						(state->hero.chunk->coords - (*chunk)->coords) * METERS_PER_CHUNK + state->hero.rel_pos.xy - rel_pos->xy,
-						ref(&state->hero.collider)
+						&collision_result,
+						collide
+						(
+							vel->xy * remaining_delta_time,
+							collider,
+							(state->monstar.chunk->coords - (*chunk)->coords) * METERS_PER_CHUNK + state->monstar.rel_pos.xy - rel_pos->xy,
+							widen(state->monstar.collider)
+						)
 					)
-				)
 			)
 			{
-				collision_entity = ref(&state->hero);
+				collision_entity = ref(&state->monstar);
+			}
+
+			//
+			//
+			//
+
+			switch (collision_result.type)
+			{
+				case CollisionResultType::none:
+				{
+				} break;
+
+				case CollisionResultType::collided:
+				{
+					f32 collided_delta_time_delta = -norm(collision_result.displacement_delta) / norm(vel->xy);
+					if (collided_delta_time_delta < collision.delta_time_delta)
+					{
+						collision =
+							{
+								.type             = CollisionType::xy,
+								.normal           = vxn(collision_result.normal, 0.0f),
+								.delta_time_delta = collided_delta_time_delta,
+								.entity           = collision_entity
+							};
+					}
+				} break;
+
+				case CollisionResultType::embedded:
+				{
+					DEBUG_printf("embedded\n");
+					rel_pos->xy += vel->xy * remaining_delta_time + collision_result.displacement_delta;
+					collision    =
+						{
+							.type             = CollisionType::xy,
+							.normal           = vxn(collision_result.normal, 0.0f),
+							.delta_time_delta = -remaining_delta_time,
+							.entity           = collision_entity
+						};
+				} break;
 			}
 		}
 
-		//
-		// Collide against pet.
-		//
-
-		if (entity.ref_type != EntityType::Pet)
+		if (rel_pos->z < level_z)
 		{
-			if
-			(
-				prioritize_collision
-				(
-					&collision,
-					collide
-					(
-						displacement.xy,
-						collider,
-						(state->pet.chunk->coords - (*chunk)->coords) * METERS_PER_CHUNK + state->pet.rel_pos.xy - rel_pos->xy,
-						ref(&state->pet.collider)
-					)
-				)
-			)
-			{
-				collision_entity = ref(&state->pet);
-			}
+			DEBUG_HALT();
+			rel_pos->z = level_z;
+			collision  =
+				{
+					.type             = CollisionType::xy,
+					.normal           = { 0.0f, 0.0f, 1.0f },
+					.delta_time_delta = -remaining_delta_time
+				};
 		}
 
-		//
-		// Collide against monstar.
-		//
-
-		if
-		(
-			state->monstar.existence_t > 0.0f
-			&& entity.ref_type != EntityType::Monstar
-			&& prioritize_collision
-				(
-					&collision,
-					collide
-					(
-						displacement.xy,
-						collider,
-						(state->monstar.chunk->coords - (*chunk)->coords) * METERS_PER_CHUNK + state->monstar.rel_pos.xy - rel_pos->xy,
-						ref(&state->monstar.collider)
-					)
-				)
-		)
+		if (vel->z < 0.0f)
 		{
-			collision_entity = ref(&state->monstar);
+			f32 level_delta_time_delta = (level_z - rel_pos->z) / vel->z - remaining_delta_time;
+			if (level_delta_time_delta <= collision.delta_time_delta)
+			{
+				collision =
+					{
+						.type             = CollisionType::level,
+						.normal           = { 0.0f, 0.0f, 1.0f },
+						.delta_time_delta = level_delta_time_delta
+					};
+			}
 		}
 
 		//
 		// Processing.
 		//
 
-		state->pressure_plate.down =
-			collide
-			(
-				displacement.xy + collision.displacement_delta,
-				ref(&state->pressure_plate.collider),
-				(state->hero.chunk->coords - state->pressure_plate.chunk->coords) * METERS_PER_CHUNK + state->hero.rel_pos.xy - state->pressure_plate.rel_pos,
-				ref(&state->hero.collider)
-			).type != CollisionType::none;
+		switch (collision.type)
+		{
+			case CollisionType::null:
+			{
+				*rel_pos += *vel * (remaining_delta_time + collision.delta_time_delta);
+			} break;
+
+			case CollisionType::xy:
+			{
+				Monstar* monstar;
+				Rock*    rock;
+				if
+				(
+					state->monstar.hp && state->monstar.hit_t == 0.0f
+					&& ((deref(&monstar, entity) && deref(&rock, collision.entity)) || (deref(&monstar, collision.entity) && deref(&rock, entity)))
+					&& dot(monstar->vel, rock->vel) < -2.0f
+				)
+				{
+					state->monstar.hit_t = 1.0f;
+					state->monstar.hp    = max(state->monstar.hp - 1, 0);
+				}
+
+				if (entity.ref_type == EntityType::Rock)
+				{
+					constexpr f32 XY_GRIP = 1.25f;
+					if (-dot(*vel * (remaining_delta_time + collision.delta_time_delta), collision.normal) < XY_GRIP && -dot(*vel, collision.normal) < XY_GRIP)
+					{
+						*rel_pos += *vel * (remaining_delta_time + collision.delta_time_delta);
+						vel->xy   = complex_mul(vel->xy, conjugate(collision.normal.xy));
+						vel->x    = max(vel->x, 0.0f);
+						vel->xy   = complex_mul(vel->xy, collision.normal.xy);
+					}
+					else
+					{
+						*rel_pos += *vel * (remaining_delta_time + collision.delta_time_delta);
+						vel->xy   = complex_mul(vel->xy, conjugate(collision.normal.xy));
+						vel->x    = 0.15f * fabsf(vel->x);
+						vel->xy   = complex_mul(vel->xy, collision.normal.xy);
+					}
+				}
+				else
+				{
+					*rel_pos += *vel * (remaining_delta_time + collision.delta_time_delta);
+					vel->xy   = complex_mul(vel->xy, conjugate(collision.normal.xy));
+					vel->x    = max(vel->x, 0.0f);
+					vel->xy   = complex_mul(vel->xy, collision.normal.xy);
+				}
+			} break;
+
+			case CollisionType::level:
+			{
+				if (entity.ref_type == EntityType::Rock)
+				{
+					vel->xy = dampen(vel->xy, { 0.0f, 0.0f }, 0.001f, -collision.delta_time_delta);
+				}
+
+				constexpr f32 LEVEL_GRIP = 0.001f;
+				if (rel_pos->z - level_z < LEVEL_GRIP && vel->z < -LEVEL_GRIP)
+				{
+					vel->z       = 0.0f;
+					rel_pos->xy += vel->xy * (remaining_delta_time + collision.delta_time_delta);
+				}
+				else
+				{
+					vel->z      *= -0.5f;
+					rel_pos->xy += vel->xy * (remaining_delta_time + collision.delta_time_delta);
+				}
+				rel_pos->z = level_z;
+			} break;
+		}
+
+		remaining_delta_time = -collision.delta_time_delta;
+
+		{
+			vi2 delta_coords = { 0, 0 };
+			if      (rel_pos->x <              0.0f) { delta_coords.x -= 1; }
+			else if (rel_pos->x >= METERS_PER_CHUNK) { delta_coords.x += 1; }
+			if      (rel_pos->y <              0.0f) { delta_coords.y -= 1; }
+			else if (rel_pos->y >= METERS_PER_CHUNK) { delta_coords.y += 1; }
+			ASSERT((*chunk)->exists);
+			*chunk       = get_chunk(state, (*chunk)->coords + delta_coords);
+			rel_pos->xy -= delta_coords * METERS_PER_CHUNK;
+		}
+
+		{
+			Hero* hero;
+			if (deref(&hero, entity))
+			{
+				//stair_below =
+				//	collide
+				//	(
+				//		{ 0.0f, 0.0f },
+				//		collider,
+				//		(state->stair.chunk->coords - (*chunk)->coords) * METERS_PER_CHUNK + state->stair.rel_pos - rel_pos->xy,
+				//		widen(Rect { .dims = { state->stair.dims.x - state->stair.rail_width * 2.0f, state->stair.dims.y } })
+				//	).type != CollisionResultType::none
+				//		? &state->stair
+				//		: 0;
+
+				state->pressure_plate.down =
+					collide
+					(
+						{ 0.0f, 0.0f },
+						widen(state->pressure_plate.collider),
+						(hero->chunk->coords - state->pressure_plate.chunk->coords) * METERS_PER_CHUNK + hero->rel_pos.xy - state->pressure_plate.rel_pos,
+						widen(hero->collider)
+					).type != CollisionResultType::none;
+			}
+		}
 
 		if
 		(
 			state->monstar.hp
 			&& state->hero.hit_t == 0.0f
-			&& ((entity.ref_type == EntityType::Hero && collision_entity.ref_type == EntityType::Monstar) || (entity.ref_type == EntityType::Monstar && collision_entity.ref_type == EntityType::Hero))
+			&& ((entity.ref_type == EntityType::Hero && collision.entity.ref_type == EntityType::Monstar) || (entity.ref_type == EntityType::Monstar && collision.entity.ref_type == EntityType::Hero))
 		)
 		{
 			state->hero.hit_t = 1.0f;
@@ -741,78 +978,66 @@ procedure void process_move(EntityRef entity, State* state, f32 delta_time)
 				}
 			}
 		}
+	}
+}
 
+#if 0
+		f32 level_z =
+			rel_pos->z >= state->stair.height
+				? state->stair.height
+				: 0.0f;
+
+		//{
+		//	Hero* hero;
+		//	if (deref(&hero, entity) && stair_below)
+		//	{
+		//		level_z = clamp((hero->rel_pos.y - (stair_below->rel_pos.y - stair_below->dims.y / 2.0f)) / stair_below->dims.y, 0.0f, 1.0f) * stair_below->height;
+
+		//		if (hero->vel.z == 0.0f)
+		//		{
+		//			hero->rel_pos.z = level_z;
+		//		}
+		//	}
+		//}
+			//if (entity.ref_type == EntityType::Rock)
+			//{
+			//	vel->xy = dampen(vel->xy, { 0.0f, 0.0f }, 0.005f, delta_time);
+			//}
+
+		constexpr f32 EFFECTIVE_LEVEL_COLLIDING_EPSILON = 0.00001f;
+		if (rel_pos->z < level_z)
 		{
-			Monstar* monstar;
-			Rock*    rock;
-			if
-			(
-				state->monstar.hp && state->monstar.hit_t == 0.0f
-				&& ((deref(&monstar, entity) && deref(&rock, collision_entity)) || (deref(&monstar, collision_entity) && deref(&rock, entity)))
-				&& dot(monstar->vel, rock->vel) < -2.0f
-			)
-			{
-				state->monstar.hit_t = 1.0f;
-				state->monstar.hp    = max(state->monstar.hp - 1, 0);
-			}
+			rel_pos->z     = level_z;
+			vel->z         = max(vel->z, 0.0f);
+			displacement.z = max(displacement.z, 0.0f);
 		}
-
-		rel_pos->xy += displacement.xy + collision.displacement_delta;
-
-		vi2 delta_coords = { 0, 0 };
-		if      (rel_pos->x <              0.0f) { delta_coords.x -= 1; }
-		else if (rel_pos->x >= METERS_PER_CHUNK) { delta_coords.x += 1; }
-		if      (rel_pos->y <              0.0f) { delta_coords.y -= 1; }
-		else if (rel_pos->y >= METERS_PER_CHUNK) { delta_coords.y += 1; }
-		ASSERT((*chunk)->exists);
-		*chunk       = get_chunk(state, (*chunk)->coords + delta_coords);
-		rel_pos->xy -= delta_coords * METERS_PER_CHUNK;
-
-		rel_pos->z += displacement.z;
-		if (rel_pos->z <= 0.0f)
+		else if (displacement.z < -EFFECTIVE_LEVEL_COLLIDING_EPSILON)
 		{
-			rel_pos->z = 0.0f;
-			if (vel->z < 0.0f)
+			f32 scalar = (level_z - rel_pos->z) / displacement.z;
+			if (scalar < 1.0f)
 			{
-				vel->z = vel->z * -0.35f;
-			}
-
-			if (entity.ref_type == EntityType::Rock)
-			{
-				vel->xy = dampen(vel->xy, { 0.0f, 0.0f }, 0.005f, delta_time);
-			}
-		}
-
-		if (collision.type == CollisionType::none)
-		{
-			break;
-		}
-		else
-		{
-			if (entity.ref_type == EntityType::Rock)
-			{
-				constexpr f32 REFLECT_K = 0.15f;
-				vel->xy         = complex_mul(vel->xy - displacement.xy - collision.displacement_delta, conjugate(collision.normal));
-				vel->x          = REFLECT_K * fabsf(vel->x);
-				vel->xy         = complex_mul(vel->xy, collision.normal);
-				displacement.xy = complex_mul(-collision.displacement_delta, conjugate(collision.normal));
-				displacement.x  = REFLECT_K * fabsf(displacement.x);
-				displacement.xy = complex_mul(displacement.xy, collision.normal);
+				constexpr f32 BOUNCE_K = 0.35f;
+				rel_pos->z      = level_z;
+				vel->z          = vel->z >= 0.0f ? vel->z : -vel->z * BOUNCE_K;
+				displacement.z  = BOUNCE_K * (scalar - 1.0f) * displacement.z;
 			}
 			else
 			{
-				vel->xy         = complex_mul(vel->xy - displacement.xy - collision.displacement_delta, conjugate(collision.normal));
-				vel->x          = max(vel->x, 0.0f);
-				vel->xy         = complex_mul(vel->xy, collision.normal);
-				displacement.xy = complex_mul(-collision.displacement_delta, conjugate(collision.normal));
-				displacement.x  = max(displacement.x, 0.0f);
-				displacement.xy = complex_mul(displacement.xy, collision.normal);
+				goto ELSE;
 			}
-
+		}
+		else
+		{
+			ELSE:;
+			rel_pos->z     += displacement.z;
 			displacement.z  = 0.0f;
 		}
-	}
-}
+
+		if (!+displacement)
+		{
+			break;
+		}
+#endif
 
 procedure u32 rgba_from(vf3 rgb)
 {
@@ -949,7 +1174,7 @@ extern PlatformUpdate_t(PlatformUpdate)
 		state->hero =
 			{
 				.chunk    = get_chunk(state, { 0, 0 }),
-				.rel_pos  = { 5.0f, 7.0f, 0.0f },
+				.rel_pos  = { 5.0f, 7.0f, 4.0f },
 				.collider = { .radius = 0.3f },
 				.hp       = 4
 			};
@@ -969,6 +1194,15 @@ extern PlatformUpdate_t(PlatformUpdate)
 				.chunk    = get_chunk(state, { 0, 0 }),
 				.rel_pos  = { 5.0f, 5.0f },
 				.collider = { .radius = 1.0f }
+			};
+
+		state->stair =
+			{
+				.chunk      = get_chunk(state, { 0, 0 }),
+				.rel_pos    = { 12.0f, 4.0f },
+				.dims       = { 2.0f, 3.0f },
+				.rail_width = 0.2f,
+				.height     = 4.2672f
 			};
 	}
 
@@ -995,7 +1229,17 @@ extern PlatformUpdate_t(PlatformUpdate)
 
 		state->hero.vel.xy = dampen(state->hero.vel.xy, target_hero_vel, 0.001f, platform_delta_time);
 
+		//if (BTN_PRESSES(.space))
+		//{
+		//	state->hero.vel.z += 4.0f;
+		//}
+
+		state->hero.vel.z += GRAVITY * platform_delta_time;
+
 		process_move(ref(&state->hero), state, platform_delta_time);
+
+		//DEBUG_printf("%f %f\n", static_cast<f64>(state->hero.rel_pos.y), static_cast<f64>(state->hero.vel.y));
+		DEBUG_printf("%f %f\n", static_cast<f64>(state->hero.rel_pos.z), static_cast<f64>(state->hero.vel.z));
 	}
 
 	//
@@ -1023,8 +1267,9 @@ extern PlatformUpdate_t(PlatformUpdate)
 			else if (ray_to_hero.y >  1.0f / SQRT2) { state->pet.cardinal = Cardinal_up;    }
 		}
 
-		state->pet.vel.xy = dampen(state->pet.vel.xy, target_pet_vel, 0.1f, platform_delta_time);
-		state->pet.vel.z  = dampen(state->pet.vel.z, (2.0f + sinf(state->pet.hover_t * TAU) * 0.25f - state->pet.rel_pos.z) * 8.0f, 0.01f, platform_delta_time);
+		state->pet.vel.xy  = dampen(state->pet.vel.xy, target_pet_vel, 0.1f, platform_delta_time);
+		state->pet.vel.z  += GRAVITY * platform_delta_time;
+		state->pet.vel.z   = dampen(state->pet.vel.z, (2.0f + sinf(state->pet.hover_t * TAU) * 0.25f - state->pet.rel_pos.z) * 8.0f, 0.01f, platform_delta_time);
 
 		process_move(ref(&state->pet), state, platform_delta_time);
 	}
@@ -1092,6 +1337,8 @@ extern PlatformUpdate_t(PlatformUpdate)
 			state->monstar.existence_t = max(state->monstar.existence_t - platform_delta_time / 1.0f, 0.0f);
 		}
 
+		state->monstar.vel.z += GRAVITY * platform_delta_time;
+
 		process_move(ref(&state->monstar), state, platform_delta_time);
 	}
 
@@ -1120,7 +1367,8 @@ extern PlatformUpdate_t(PlatformUpdate)
 	//
 
 	{
-		state->hero.rock_throw_t -= platform_delta_time / 1.0f;
+		state->hero.rock_throw_t = max(state->hero.rock_throw_t - platform_delta_time / 1.0f, 0.0f);
+
 
 		if (BTN_PRESSES(.space) && state->hero.rock_throw_t <= 0.0f)
 		{
@@ -1130,7 +1378,7 @@ extern PlatformUpdate_t(PlatformUpdate)
 			bool32 colliding = false;
 			FOR_ELEMS(rock, state->rock_buffer, state->rock_count)
 			{
-				if (collide({ 0.0f, 0.0f }, ref(&rock->collider), (rock->chunk->coords - state->hero.chunk->coords) * METERS_PER_CHUNK + rock->rel_pos.xy - state->hero.rel_pos.xy, ref(&rock->collider)).type != CollisionType::none)
+				if (collide({ 0.0f, 0.0f }, widen(rock->collider), (rock->chunk->coords - state->hero.chunk->coords) * METERS_PER_CHUNK + rock->rel_pos.xy - state->hero.rel_pos.xy, widen(rock->collider)).type != CollisionResultType::none)
 				{
 					colliding = true;
 					break;
@@ -1159,7 +1407,8 @@ extern PlatformUpdate_t(PlatformUpdate)
 		{
 			constexpr f32 DURATION = 4.0f;
 			f32 old_existence_t = rock->existence_t;
-			rock->existence_t = clamp(rock->existence_t - platform_delta_time / DURATION, 0.0f, 1.0f);
+			rock->existence_t     = clamp(rock->existence_t - platform_delta_time / DURATION, 0.0f, 1.0f);
+			rock->vel.z          += GRAVITY * platform_delta_time;
 			process_move(ref(rock), state, (old_existence_t - rock->existence_t) * DURATION);
 		}
 	}
@@ -1261,9 +1510,44 @@ extern PlatformUpdate_t(PlatformUpdate)
 					vxx(tree->collider.dims * PIXELS_PER_METER),
 					rgba_from(0.25f, 0.825f, 0.4f)
 				);
-				//draw_thing(chunk_node->chunk.coords, vxn(tree->rel_pos, 0.0f), { 0.5f, 0.3f }, &state->bmp.trees[tree->bmp_index]);
+				draw_thing(chunk_node->chunk.coords, vxn(tree->rel_pos, 0.0f), { 0.5f, 0.3f }, &state->bmp.trees[tree->bmp_index]);
 			}
 		}
+	}
+
+	//
+	// Render stair.
+	//
+
+	{
+		draw_rect
+		(
+			platform_framebuffer,
+			screen_coords_of(state->stair.chunk->coords, vxn(state->stair.rel_pos - state->stair.dims / 2.0f, 0.0f)),
+			screen_coords_of(state->stair.chunk->coords, vxn(state->stair.rel_pos + state->stair.dims / 2.0f, 0.0f)) - screen_coords_of({ 0, 0 }, vxn(state->stair.rel_pos - state->stair.dims / 2.0f, 0.0f)),
+			rgba_from(0.25f, 0.35f, 0.45f)
+		);
+		draw_rect
+		(
+			platform_framebuffer,
+			screen_coords_of(state->stair.chunk->coords, vxn(state->stair.rel_pos - state->stair.dims / 2.0f                                 , 0.0f)),
+			screen_coords_of(state->stair.chunk->coords, vxn(state->stair.rel_pos + vf2 { -state->stair.dims.x / 2.0f + state->stair.rail_width, state->stair.dims.y / 2.0f }, 0.0f)) - screen_coords_of({ 0, 0 }, vxn(state->stair.rel_pos - state->stair.dims / 2.0f, 0.0f)),
+			rgba_from(0.35f, 0.25f, 0.15f)
+		);
+		draw_rect
+		(
+			platform_framebuffer,
+			screen_coords_of(state->stair.chunk->coords, vxn(state->stair.rel_pos + vf2 {  state->stair.dims.x / 2.0f - state->stair.rail_width, -state->stair.dims.y / 2.0f }                         , 0.0f)),
+			screen_coords_of(state->stair.chunk->coords, vxn(state->stair.rel_pos + vf2 { -state->stair.dims.x / 2.0f + state->stair.rail_width,  state->stair.dims.y / 2.0f }, 0.0f)) - screen_coords_of({ 0, 0 }, vxn(state->stair.rel_pos - state->stair.dims / 2.0f, 0.0f)),
+			rgba_from(0.35f, 0.25f, 0.15f)
+		);
+		draw_rect
+		(
+			platform_framebuffer,
+			screen_coords_of(state->stair.chunk->coords, vxn(state->stair.rel_pos - state->stair.dims / 2.0f, state->stair.height)),
+			screen_coords_of(state->stair.chunk->coords, vxn(state->stair.rel_pos + state->stair.dims / 2.0f, state->stair.height)) - screen_coords_of({ 0, 0 }, vxn(state->stair.rel_pos - state->stair.dims / 2.0f, state->stair.height)),
+			rgba_from(0.75f, 0.65f, 0.55f)
+		);
 	}
 
 	//
