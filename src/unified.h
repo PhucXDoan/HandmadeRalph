@@ -3,6 +3,7 @@
 #pragma clang diagnostic ignored "-Wunused-function"
 #pragma clang diagnostic ignored "-Wunused-template"
 #pragma clang diagnostic ignored "-Wunused-macros"
+#pragma clang diagnostic ignored "-Wfloat-equal"
 
 #include <stdint.h>
 typedef uint8_t        byte;
@@ -295,6 +296,9 @@ struct vf4
 procedure constexpr bool32 operator+ (const vf2& v              ) { return v.x != 0.0f || v.y != 0.0f;                               }
 procedure constexpr bool32 operator+ (const vf3& v              ) { return v.x != 0.0f || v.y != 0.0f || v.z != 0.0f;                }
 procedure constexpr bool32 operator+ (const vf4& v              ) { return v.x != 0.0f || v.y != 0.0f || v.z != 0.0f || v.w != 0.0f; }
+procedure constexpr bool32 operator==(const vf2& u, const vf2& v) { return u.x == v.x  && u.y == v.y;                                }
+procedure constexpr bool32 operator==(const vf3& u, const vf3& v) { return u.x == v.x  && u.y == v.y  && u.z == v.z;                 }
+procedure constexpr bool32 operator==(const vf4& u, const vf4& v) { return u.x == v.x  && u.y == v.y  && u.z == v.z  && u.w == v.w;  }
 procedure constexpr vf2    operator- (const vf2& v              ) { return { -v.x, -v.y             }; }
 procedure constexpr vf3    operator- (const vf3& v              ) { return { -v.x, -v.y, -v.z       }; }
 procedure constexpr vf4    operator- (const vf4& v              ) { return { -v.x, -v.y, -v.z, -v.w }; }

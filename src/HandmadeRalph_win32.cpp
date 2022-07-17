@@ -200,6 +200,11 @@ procedure LRESULT window_procedure_callback(HWND window, UINT message, WPARAM wp
 			g_client_dims = { client_rect.right - client_rect.left, client_rect.bottom - client_rect.top };
 		} break;
 
+		case WM_MENUCHAR:
+		{
+			return MNC_CLOSE << 16;
+		} break;
+
 		case WM_SYSKEYDOWN:
 		case WM_SYSKEYUP:
 		case WM_KEYDOWN:
@@ -221,14 +226,16 @@ procedure LRESULT window_procedure_callback(HWND window, UINT message, WPARAM wp
 				{
 					switch (wparam)
 					{
-						case VK_LEFT   : PROCESS_PLATFORM_BUTTON(.arrow_left,  is_down); break;
-						case VK_RIGHT  : PROCESS_PLATFORM_BUTTON(.arrow_right, is_down); break;
-						case VK_DOWN   : PROCESS_PLATFORM_BUTTON(.arrow_down,  is_down); break;
-						case VK_UP     : PROCESS_PLATFORM_BUTTON(.arrow_up,    is_down); break;
-						case VK_RETURN : PROCESS_PLATFORM_BUTTON(.enter,       is_down); break;
-						case VK_SHIFT  : PROCESS_PLATFORM_BUTTON(.shift,       is_down); break;
-						case VK_MENU   : PROCESS_PLATFORM_BUTTON(.alt,         is_down); break;
-						case VK_SPACE  : PROCESS_PLATFORM_BUTTON(.space,       is_down); break;
+						case VK_LEFT     : PROCESS_PLATFORM_BUTTON(.arrow_left,  is_down); break;
+						case VK_RIGHT    : PROCESS_PLATFORM_BUTTON(.arrow_right, is_down); break;
+						case VK_DOWN     : PROCESS_PLATFORM_BUTTON(.arrow_down,  is_down); break;
+						case VK_UP       : PROCESS_PLATFORM_BUTTON(.arrow_up,    is_down); break;
+						case VK_RETURN   : PROCESS_PLATFORM_BUTTON(.enter,       is_down); break;
+						case VK_SHIFT    : PROCESS_PLATFORM_BUTTON(.shift,       is_down); break;
+						case VK_MENU     : PROCESS_PLATFORM_BUTTON(.alt,         is_down); break;
+						case VK_SPACE    : PROCESS_PLATFORM_BUTTON(.space,       is_down); break;
+						case VK_OEM_MINUS: PROCESS_PLATFORM_BUTTON(.sub,         is_down); break;
+						case VK_OEM_PLUS : PROCESS_PLATFORM_BUTTON(.plus,        is_down); break;
 						case VK_F4:
 						{
 							if (lparam & (1 << 29))
@@ -585,7 +592,7 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int cmd_show)
 
 		#if DEBUG
 		//
-		// (Debug) Hotloading.
+		// Debug Hotloading.
 		//
 
 		{
@@ -615,7 +622,7 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int cmd_show)
 
 			#if DEBUG
 			//
-			// (Debug) Pause.
+			// Debug Pause.
 			//
 
 			{
@@ -624,14 +631,14 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int cmd_show)
 				{
 					is_paused = !is_paused;
 				}
-				if (is_paused)
+				if (is_paused && IMPLIES(BUTTON_DOWN(g_platform_input.button.alt), !BUTTON_PRESSES(g_platform_input.button.sub)))
 				{
 					goto PAUSE_END;
 				}
 			}
 
 			//
-			// (Debug) Playback.
+			// Debug Playback.
 			//
 
 			{
