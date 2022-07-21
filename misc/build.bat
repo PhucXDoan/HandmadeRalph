@@ -8,7 +8,7 @@ set COMMON_COMPILER_FLAGS=^
 	-DSRC_DIR="\"W:/src/\""^
 	-Wno-c++17-extensions                        -Wno-c++20-designator -Wno-c++98-compat         -Wno-c++98-compat-pedantic -Wno-gnu-zero-variadic-macro-arguments -Wno-duplicate-enum^
 	-Wno-deprecated-copy-with-user-provided-dtor -Wno-missing-braces   -Wno-gnu-anonymous-struct -Wno-nested-anon-types     -Wno-cast-function-type                -Wno-disabled-macro-expansion^
-	-Wno-zero-as-null-pointer-constant -Wno-double-promotion
+	-Wno-zero-as-null-pointer-constant           -Wno-double-promotion -Wno-unreachable-code-break
 
 set DEBUG_COMPILER_FLAGS=%COMMON_COMPILER_FLAGS% -O0 -g -gcodeview -DDEBUG=1 -Wno-unused-parameter -Wno-unused-command-line-argument -Wno-unused-function -Wno-unused-variable -Wno-unused-macros -Wno-unused-template
 
