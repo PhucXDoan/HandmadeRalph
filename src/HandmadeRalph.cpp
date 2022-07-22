@@ -101,7 +101,7 @@ struct State
 			BMP background;                                 // @META@ background.bmp
 			BMP rocks      [4];                             // @META@ rock00.bmp         , rock01.bmp          , rock02.bmp          , rock03.bmp
 			BMP trees      [3];                             // @META@ tree00.bmp         , tree01.bmp          , tree02.bmp
-			BMP pressure_plate;                             // @META@ grass01.bmp
+			BMP pressure_plate;                             // @META@ grass00.bmp
 		}   bmp;
 		BMP bmps[sizeof(bmp) / sizeof(BMP)];
 	};
@@ -334,6 +334,13 @@ PlatformUpdate_t(PlatformUpdate)
 			chunk->tiles[state->pet.coords.y][state->pet.coords.x].entity = ref(&state->pet);
 		}
 
+		{
+			state->pressure_plate.coords = { 1, 3 };
+			Chunk* chunk = get_chunk(state, state->pressure_plate.coords);
+			ASSERT(!chunk->tiles[state->pressure_plate.coords.y][state->pressure_plate.coords.x].pressure_plate);
+			chunk->tiles[state->pressure_plate.coords.y][state->pressure_plate.coords.x].pressure_plate = &state->pressure_plate;
+		}
+
 		FOR_RANGE(chunk_iy, -4, 4)
 		{
 			FOR_RANGE(chunk_ix, -4, 4)
@@ -353,13 +360,6 @@ PlatformUpdate_t(PlatformUpdate)
 				}
 			}
 		}
-
-		{
-			state->pressure_plate.coords = { 1, 3 };
-			Chunk* chunk = get_chunk(state, state->pressure_plate.coords);
-			ASSERT(!chunk->tiles[state->pressure_plate.coords.y][state->pressure_plate.coords.x].pressure_plate);
-			chunk->tiles[state->pressure_plate.coords.y][state->pressure_plate.coords.x].pressure_plate = &state->pressure_plate;
-		}
 	}
 
 	//
@@ -367,24 +367,28 @@ PlatformUpdate_t(PlatformUpdate)
 	//
 
 	lambda move =
-		[&](EntityRef entity, vi2 delta_coords)
+		[&](EntityRef entity, Cardinal movement)
 		{
 			vi2* coords;
+			vf3* rel_pos;
 			switch (entity.ref_type)
 			{
 				case EntityType::Hero:
 				{
-					coords = &entity.Hero_->coords;
+					coords  = &entity.Hero_->coords;
+					rel_pos = &entity.Hero_->rel_pos;
 				} break;
 
 				case EntityType::Pet:
 				{
-					coords = &entity.Pet_->coords;
+					coords  = &entity.Pet_->coords;
+					rel_pos = &entity.Pet_->rel_pos;
 				} break;
 
 				case EntityType::Monstar:
 				{
-					coords = &entity.Monstar_->coords;
+					coords  = &entity.Monstar_->coords;
+					rel_pos = &entity.Monstar_->rel_pos;
 				} break;
 
 				case EntityType::null:
@@ -396,63 +400,62 @@ PlatformUpdate_t(PlatformUpdate)
 				} break;
 			}
 
-			if (+delta_coords)
+			vi2 delta_coords = META_Cardinal[movement].vi;
+
+			Chunk* old_chunk = get_chunk(state, *coords               );
+			Chunk* new_chunk = get_chunk(state, *coords + delta_coords);
+
+			ASSERT(IN_RANGE(coords->x + - old_chunk->coords.x, 0, CHUNK_DIM));
+			ASSERT(IN_RANGE(coords->y + - old_chunk->coords.y, 0, CHUNK_DIM));
+			aliasing old_tile  = old_chunk->tiles[coords->y - old_chunk->coords.y][coords->x - old_chunk->coords.x];
+
+			ASSERT(IN_RANGE(coords->x + delta_coords.x - new_chunk->coords.x, 0, CHUNK_DIM));
+			ASSERT(IN_RANGE(coords->y + delta_coords.y - new_chunk->coords.y, 0, CHUNK_DIM));
+			aliasing new_tile  = new_chunk->tiles[coords->y + delta_coords.y - new_chunk->coords.y][coords->x + delta_coords.x - new_chunk->coords.x];
+
+			ASSERT(old_tile.entity.ref_type != EntityType::null);
+			if (new_tile.entity.ref_type == EntityType::null)
 			{
-				Chunk* old_chunk = get_chunk(state, *coords               );
-				Chunk* new_chunk = get_chunk(state, *coords + delta_coords);
-
-				ASSERT(IN_RANGE(coords->x + - old_chunk->coords.x, 0, CHUNK_DIM));
-				ASSERT(IN_RANGE(coords->y + - old_chunk->coords.y, 0, CHUNK_DIM));
-				aliasing old_tile  = old_chunk->tiles[coords->y - old_chunk->coords.y][coords->x - old_chunk->coords.x];
-
-				ASSERT(IN_RANGE(coords->x + delta_coords.x - new_chunk->coords.x, 0, CHUNK_DIM));
-				ASSERT(IN_RANGE(coords->y + delta_coords.y - new_chunk->coords.y, 0, CHUNK_DIM));
-				aliasing new_tile  = new_chunk->tiles[coords->y + delta_coords.y - new_chunk->coords.y][coords->x + delta_coords.x - new_chunk->coords.x];
-
-				ASSERT(old_tile.entity.ref_type != EntityType::null);
-				if (new_tile.entity.ref_type == EntityType::null)
+				if (old_tile.pressure_plate)
 				{
-					if (old_tile.pressure_plate)
-					{
-						ASSERT(old_tile.pressure_plate->pressed);
-						old_tile.pressure_plate->pressed = false;
-					}
-					if (new_tile.pressure_plate)
-					{
-						ASSERT(!new_tile.pressure_plate->pressed);
-						new_tile.pressure_plate->pressed = true;
-					}
-
-					*coords += delta_coords;
-					old_tile.entity = {};
-					new_tile.entity = entity;
+					ASSERT(old_tile.pressure_plate->pressed);
+					old_tile.pressure_plate->pressed = false;
 				}
-				else
+				if (new_tile.pressure_plate)
 				{
-					{
-						Hero*    hero;
-						Monstar* monstar;
-						if (deref(&hero, entity) && deref(&monstar, new_tile.entity))
-						{
-							hero->rel_pos.xy += delta_coords / 2.0f;
-							monstar->hp       = max(monstar->hp - 1, 0);
-						}
-					}
-					{
-						Monstar* monstar;
-						Hero*    hero;
-						if (deref(&monstar, entity) && deref(&hero, new_tile.entity))
-						{
-							monstar->rel_pos.xy += delta_coords / 2.0f;
+					ASSERT(!new_tile.pressure_plate->pressed);
+					new_tile.pressure_plate->pressed = true;
+				}
 
-							if (+(monstar->flag & MonstarFlag::strong))
-							{
-								hero->hp = max(hero->hp - 2, 0);
-							}
-							else
-							{
-								hero->hp = max(hero->hp - 1, 0);
-							}
+				*coords += delta_coords;
+				old_tile.entity = {};
+				new_tile.entity = entity;
+			}
+			else
+			{
+				{
+					Hero*    hero;
+					Monstar* monstar;
+					if (deref(&hero, entity) && deref(&monstar, new_tile.entity))
+					{
+						hero->rel_pos.xy += delta_coords / 2.0f;
+						monstar->hp       = max(monstar->hp - 1, 0);
+					}
+				}
+				{
+					Monstar* monstar;
+					Hero*    hero;
+					if (deref(&monstar, entity) && deref(&hero, new_tile.entity))
+					{
+						monstar->rel_pos.xy += delta_coords / 2.0f;
+
+						if (+(monstar->flag & MonstarFlag::strong))
+						{
+							hero->hp = max(hero->hp - 2, 0);
+						}
+						else
+						{
+							hero->hp = max(hero->hp - 1, 0);
 						}
 					}
 				}
@@ -465,11 +468,14 @@ PlatformUpdate_t(PlatformUpdate)
 
 	{
 		vi2 delta_coords = WASD_PRESSES();
-		if      (delta_coords.x < 0) { state->hero.cardinal = Cardinal_left;  }
-		else if (delta_coords.x > 0) { state->hero.cardinal = Cardinal_right; }
-		else if (delta_coords.y < 0) { state->hero.cardinal = Cardinal_down;  }
-		else if (delta_coords.y > 0) { state->hero.cardinal = Cardinal_up;    }
-		move(ref(&state->hero), delta_coords);
+		if (+delta_coords)
+		{
+			if      (delta_coords.x < 0) { state->hero.cardinal = Cardinal_left;  }
+			else if (delta_coords.x > 0) { state->hero.cardinal = Cardinal_right; }
+			else if (delta_coords.y < 0) { state->hero.cardinal = Cardinal_down;  }
+			else if (delta_coords.y > 0) { state->hero.cardinal = Cardinal_up;    }
+			move(ref(&state->hero), state->hero.cardinal);
+		}
 	}
 
 	//
@@ -506,7 +512,7 @@ PlatformUpdate_t(PlatformUpdate)
 			{
 				delta_coords = { sign(delta_coords.x), sign(delta_coords.y) };
 				state->pet.move_t -= 1.0f;
-				move(ref(&state->pet), delta_coords);
+				move(ref(&state->pet), state->pet.cardinal);
 			}
 		}
 	}
@@ -572,7 +578,7 @@ PlatformUpdate_t(PlatformUpdate)
 			{
 				delta_coords = { sign(delta_coords.x), sign(delta_coords.y) };
 				state->monstar.move_t -= 1.0f;
-				move(ref(&state->monstar), delta_coords);
+				move(ref(&state->monstar), state->monstar.cardinal);
 			}
 		}
 		else
