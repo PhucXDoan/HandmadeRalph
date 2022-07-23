@@ -73,10 +73,10 @@ typedef double         f64;
 #define IFF(P, Q)                           (!(P) == !(Q))
 #define IN_RANGE(X, MINI, MAXI)             ((MINI) <= (X) && (X) < (MAXI))
 #define SWAP(X, Y)                          do { auto MACRO_CONCAT(SWAP_, __LINE__) = *(X); *(X) = *(Y); *(Y) = MACRO_CONCAT(SWAP_, __LINE__); } while (false)
-#define KIBIBYTES_OF(N)                     (1024ull *             (N))
-#define MEBIBYTES_OF(N)                     (1024ull * KIBIBYTES_OF(N))
-#define GIBIBYTES_OF(N)                     (1024ull * MEBIBYTES_OF(N))
-#define TEBIBYTES_OF(N)                     (1024ull * GIBIBYTES_OF(N))
+#define KIBIBYTES_OF(N)                     (1024LL *             (N))
+#define MEBIBYTES_OF(N)                     (1024LL * KIBIBYTES_OF(N))
+#define GIBIBYTES_OF(N)                     (1024LL * MEBIBYTES_OF(N))
+#define TEBIBYTES_OF(N)                     (1024LL * GIBIBYTES_OF(N))
 
 #if DEBUG
 	#pragma clang diagnostic push

@@ -19,7 +19,7 @@
 #define HJKL_RELEASES()         (vi2 { -LTR_RELEASES('h') + LTR_RELEASES('l'), -LTR_RELEASES('j') + LTR_RELEASES('k') })
 
 global constexpr i32 PLATFORM_GAMEPAD_MAX = 4;
-global constexpr u64 PLATFORM_MEMORY_SIZE = GIBIBYTES_OF(1);
+global constexpr i64 PLATFORM_MEMORY_SIZE = GIBIBYTES_OF(1);
 
 struct PlatformFramebuffer
 {

@@ -3,7 +3,7 @@
 #include "rng.cpp"
 
 constexpr i32 CHUNK_DIM        = 16;
-constexpr f32 PIXELS_PER_METER = 64.0f;
+constexpr f32 PIXELS_PER_METER = 80.0f;
 constexpr f32 PIXELS_PER_Z     = 32.0f;
 
 struct BMP
@@ -86,6 +86,15 @@ struct Chunk
 	} tiles[CHUNK_DIM][CHUNK_DIM];
 };
 
+constexpr vi2 CACHED_GROUND_BMP_DIMS     = vx2(256);
+constexpr i32 CACHED_GROUND_BMP_CAPACITY = 64;
+struct CachedGroundBMP
+{
+	bool32 exists;
+	vi2    coords;
+	u32*   rgba;
+};
+
 struct State
 {
 	bool32      inited;
@@ -112,32 +121,37 @@ struct State
 	};
 	#include "META/asset/bmp_file_paths.h"
 
-	BMP           cached_ground;
-
-	Chunk         chunk_hashtable[256];
-	Hero          hero;
-	Pet           pet;
-	Monstar       monstar;
-	PressurePlate pressure_plate;
-	vi2           camera_coords;
-	vf2           camera_rel_pos;
+	Chunk             chunk_hashtable[256];
+	Hero              hero;
+	Pet               pet;
+	Monstar           monstar;
+	PressurePlate     pressure_plate;
+	vi2               camera_coords;
+	vf2               camera_rel_pos;
 };
 
-procedure void draw_rect(BMP* dst, vi2 center, vi2 dims, u32 rgba)
+struct TransState
+{
+	bool32           inited;
+	MemoryArena      arena;
+	CachedGroundBMP* cached_ground_bmps;
+};
+
+procedure void draw_rect(BMP dst, vi2 center, vi2 dims, u32 rgba)
 {
 	ASSERT(IN_RANGE(dims.x, 0, 2048));
 	ASSERT(IN_RANGE(dims.y, 0, 2048));
-	vi2 start = { center.x - dims.x / 2, dst->dims.y - center.y - dims.y / 2 };
-	FOR_RANGE(y, max(start.y, 0), min(start.y + dims.y, dst->dims.y))
+	vi2 start = { center.x - dims.x / 2, dst.dims.y - center.y - dims.y / 2 };
+	FOR_RANGE(y, max(start.y, 0), min(start.y + dims.y, dst.dims.y))
 	{
-		FOR_RANGE(x, max(start.x, 0), min(start.x + dims.x, dst->dims.x))
+		FOR_RANGE(x, max(start.x, 0), min(start.x + dims.x, dst.dims.x))
 		{
-			dst->rgba[y * dst->dims.x + x] = rgba;
+			dst.rgba[y * dst.dims.x + x] = rgba;
 		}
 	}
 }
 
-procedure void draw_rect_outline(BMP* dst, vi2 center, vi2 dims, u32 rgba)
+procedure void draw_rect_outline(BMP dst, vi2 center, vi2 dims, u32 rgba)
 {
 	constexpr i32 THICKNESS = 4;
 	draw_rect(dst, center + vi2 { -dims.x / 2 + THICKNESS / 2,                           0 }, { THICKNESS,    dims.y }, rgba);
@@ -146,39 +160,39 @@ procedure void draw_rect_outline(BMP* dst, vi2 center, vi2 dims, u32 rgba)
 	draw_rect(dst, center + vi2 {                           0,  dims.x / 2 - THICKNESS / 2 }, {    dims.x, THICKNESS }, rgba);
 }
 
-procedure void draw_bmp(BMP* dst, BMP* src, vi2 center, f32 alpha = 1.0f)
+procedure void draw_bmp(BMP dst, BMP src, vi2 center, f32 alpha = 1.0f)
 {
-	vi2 start = { center.x - src->dims.x / 2, dst->dims.y - center.y - src->dims.y / 2 };
-	FOR_RANGE(y, max(start.y, 0), min(start.y + src->dims.y, dst->dims.y))
+	vi2 start = { center.x - src.dims.x / 2, dst.dims.y - center.y - src.dims.y / 2 };
+	FOR_RANGE(y, max(start.y, 0), min(start.y + src.dims.y, dst.dims.y))
 	{
-		FOR_RANGE(x, max(start.x, 0), min(start.x + src->dims.x, dst->dims.x))
+		FOR_RANGE(x, max(start.x, 0), min(start.x + src.dims.x, dst.dims.x))
 		{
-			aliasing bot = dst->rgba[y * dst->dims.x + x];
-			aliasing top = src->rgba[(y - start.y) * src->dims.x + x - start.x];
+			aliasing bot = dst.rgba[y * dst.dims.x + x];
+			aliasing top = src.rgba[(y - start.y) * src.dims.x + x - start.x];
 			bot =
-				(static_cast<u32>((1.0f - static_cast<f32>((top >> 24) & 0xFF) / 255.0f) * static_cast<f32>((bot >> 24) & 0xFF) + static_cast<f32>((top >> 24) & 0xFF)) << 24) |
-				(static_cast<u32>((1.0f - static_cast<f32>((top >> 24) & 0xFF) / 255.0f) * static_cast<f32>((bot >> 16) & 0xFF) + static_cast<f32>((top >> 16) & 0xFF)) << 16) |
-				(static_cast<u32>((1.0f - static_cast<f32>((top >> 24) & 0xFF) / 255.0f) * static_cast<f32>((bot >>  8) & 0xFF) + static_cast<f32>((top >>  8) & 0xFF)) <<  8) |
-				(static_cast<u32>((1.0f - static_cast<f32>((top >> 24) & 0xFF) / 255.0f) * static_cast<f32>((bot >>  0) & 0xFF) + static_cast<f32>((top >>  0) & 0xFF)) <<  0);
+				(static_cast<u32>((1.0f - static_cast<f32>((top >> 24) & 0xFF) / 255.0f * alpha) * static_cast<f32>((bot >> 24) & 0xFF) + static_cast<f32>((top >> 24) & 0xFF) * alpha) << 24) |
+				(static_cast<u32>((1.0f - static_cast<f32>((top >> 24) & 0xFF) / 255.0f * alpha) * static_cast<f32>((bot >> 16) & 0xFF) + static_cast<f32>((top >> 16) & 0xFF) * alpha) << 16) |
+				(static_cast<u32>((1.0f - static_cast<f32>((top >> 24) & 0xFF) / 255.0f * alpha) * static_cast<f32>((bot >>  8) & 0xFF) + static_cast<f32>((top >>  8) & 0xFF) * alpha) <<  8) |
+				(static_cast<u32>((1.0f - static_cast<f32>((top >> 24) & 0xFF) / 255.0f * alpha) * static_cast<f32>((bot >>  0) & 0xFF) + static_cast<f32>((top >>  0) & 0xFF) * alpha) <<  0);
 		}
 	}
 }
 
-procedure void draw_circle(BMP* bmp, vi2 pos, i32 radius, u32 rgba)
+procedure void draw_circle(BMP dst, vi2 pos, i32 radius, u32 rgba)
 {
 	ASSERT(IN_RANGE(radius, 0, 128));
-	i32 x0 = clamp(              pos.x - radius, 0, bmp->dims.x);
-	i32 x1 = clamp(              pos.x + radius, 0, bmp->dims.x);
-	i32 y0 = clamp(bmp->dims.y - pos.y - radius, 0, bmp->dims.y);
-	i32 y1 = clamp(bmp->dims.y - pos.y + radius, 0, bmp->dims.y);
+	i32 x0 = clamp(             pos.x - radius, 0, dst.dims.x);
+	i32 x1 = clamp(             pos.x + radius, 0, dst.dims.x);
+	i32 y0 = clamp(dst.dims.y - pos.y - radius, 0, dst.dims.y);
+	i32 y1 = clamp(dst.dims.y - pos.y + radius, 0, dst.dims.y);
 
 	FOR_RANGE(x, x0, x1)
 	{
 		FOR_RANGE(y, y0, y1)
 		{
-			if (square(x - pos.x) + square(y - bmp->dims.y + pos.y) <= square(radius))
+			if (square(x - pos.x) + square(y - dst.dims.y + pos.y) <= square(radius))
 			{
-				bmp->rgba[y * bmp->dims.x + x] = rgba;
+				dst.rgba[y * dst.dims.x + x] = rgba;
 			}
 		}
 	}
@@ -223,15 +237,19 @@ procedure Chunk* get_chunk(State* state, vi2 coords)
 
 PlatformUpdate_t(PlatformUpdate)
 {
-	State* state = reinterpret_cast<State*>(platform_memory);
+	State*      state = reinterpret_cast<State     *>(platform_memory                );
+	TransState* trans = reinterpret_cast<TransState*>(platform_memory + sizeof(State));
+	static_assert(sizeof(State) + sizeof(TransState) <= PLATFORM_MEMORY_SIZE);
+	constexpr i64 STATE_SIZE = PLATFORM_MEMORY_SIZE / 2;
+	constexpr i64 TRANS_SIZE = PLATFORM_MEMORY_SIZE - STATE_SIZE;
 
 	if (!state->inited)
 	{
 		state->inited = true;
 		state->arena  =
 			{
-				.size = PLATFORM_MEMORY_SIZE - sizeof(State),
-				.data = platform_memory      + sizeof(State)
+				.size = STATE_SIZE      - sizeof(State),
+				.data = platform_memory + sizeof(State)
 			};
 
 		//
@@ -320,41 +338,6 @@ PlatformUpdate_t(PlatformUpdate)
 		}
 
 		//
-		// Generate ground.
-		//
-
-		{
-			state->cached_ground.dims = { 1024, 1024 };
-			state->cached_ground.rgba = allocate<u32>(&state->arena, state->cached_ground.dims.x * state->cached_ground.dims.y);
-			memset(state->cached_ground.rgba, 0, sizeof(u32) * static_cast<size_t>(state->cached_ground.dims.x * state->cached_ground.dims.y));
-
-			constexpr f32 RADIUS  = 4.0f;
-			constexpr i32 SAMPLES = 128;
-
-			FOR_RANGE(i, SAMPLES)
-			{
-				draw_bmp
-				(
-					&state->cached_ground,
-					rng(&state->seed) < 0.5f
-						? rng(&state->seed, state->bmp.grounds)
-						: rng(&state->seed, state->bmp.grasses),
-					state->cached_ground.dims / 2 + vxx(vf2 { rng(&state->seed, -RADIUS, RADIUS), rng(&state->seed, -RADIUS, RADIUS) } * PIXELS_PER_METER)
-				);
-			}
-			FOR_RANGE(i, SAMPLES)
-			{
-				draw_bmp
-				(
-					&state->cached_ground,
-					rng(&state->seed, state->bmp.tufts),
-					state->cached_ground.dims / 2 + vxx(vf2 { rng(&state->seed, -RADIUS, RADIUS), rng(&state->seed, -RADIUS, RADIUS) } * PIXELS_PER_METER)
-				);
-			}
-		}
-
-
-		//
 		// Initializes entities.
 		//
 
@@ -399,6 +382,59 @@ PlatformUpdate_t(PlatformUpdate)
 				}
 			}
 		}
+	}
+	if (!trans->inited)
+	{
+		trans->inited = true;
+		trans->arena  =
+			{
+				.size = TRANS_SIZE - sizeof(TransState),
+				.data = platform_memory + STATE_SIZE + sizeof(TransState)
+			};
+
+		{
+			trans->cached_ground_bmps = allocate<CachedGroundBMP>(&trans->arena, CACHED_GROUND_BMP_CAPACITY);
+			FOR_ELEMS(it, trans->cached_ground_bmps, CACHED_GROUND_BMP_CAPACITY)
+			{
+				*it      = {};
+				it->rgba = allocate<u32>(&trans->arena, CACHED_GROUND_BMP_DIMS.x * CACHED_GROUND_BMP_DIMS.y);
+			}
+		}
+
+		lambda gen_ground =
+			[&](CachedGroundBMP* it, vi2 coords)
+			{
+				u32 seed = 1234;
+
+				it->exists = true;
+				it->coords = coords;
+
+				memset(it->rgba, 0, sizeof(u32) * static_cast<size_t>(CACHED_GROUND_BMP_DIMS.x * CACHED_GROUND_BMP_DIMS.y));
+
+				FOR_RANGE(i, 1024)
+				{
+					draw_bmp
+					(
+						{ CACHED_GROUND_BMP_DIMS, it->rgba },
+						rng(&seed) < 0.5f
+							? *rng(&seed, state->bmp.grounds)
+							: *rng(&seed, state->bmp.grasses),
+						CACHED_GROUND_BMP_DIMS / 2 + vxx(vf2 { rng(&seed, -0.5f, 0.5f) * CHUNK_DIM, rng(&seed, -0.5f, 0.5f) * CHUNK_DIM } * PIXELS_PER_METER)
+					);
+				}
+				FOR_RANGE(i, 256)
+				{
+					draw_bmp
+					(
+						{ CACHED_GROUND_BMP_DIMS, it->rgba },
+						*rng(&seed, state->bmp.tufts),
+						CACHED_GROUND_BMP_DIMS / 2 + vxx(vf2 { rng(&seed, -0.5f, 0.5f) * CHUNK_DIM, rng(&seed, -0.5f, 0.5f) * CHUNK_DIM } * PIXELS_PER_METER)
+					);
+				}
+			};
+
+		gen_ground(&trans->cached_ground_bmps[0], {         0, 0 });
+		gen_ground(&trans->cached_ground_bmps[1], { CHUNK_DIM, 0 });
 	}
 
 	//
@@ -670,7 +706,7 @@ PlatformUpdate_t(PlatformUpdate)
 				constexpr i32 HP_DIM = 10;
 				draw_rect
 				(
-					&screen,
+					screen,
 					screen_coords_of(coords, { 0.0f, 0.0f, 0.0f }) + vxx(vf2 { -HP_DIM * 2.0f * (static_cast<f32>(i) - static_cast<f32>(hp) / 2.0f + 0.5f), -25.0f }),
 					vx2(HP_DIM),
 					rgba_from(0.9f, 0.1f, 0.1f)
@@ -680,7 +716,13 @@ PlatformUpdate_t(PlatformUpdate)
 
 	memset(screen.rgba, 32, static_cast<u64>(screen.dims.x * screen.dims.y) * sizeof(u32));
 
-	draw_bmp(&screen, &state->cached_ground, screen.dims / 2);
+	FOR_ELEMS(it, trans->cached_ground_bmps, CACHED_GROUND_BMP_CAPACITY)
+	{
+		if (it->exists)
+		{
+			draw_bmp(screen, { CACHED_GROUND_BMP_DIMS, it->rgba }, screen_coords_of(it->coords, { 0.0f, 0.0f, 0.0f }));
+		}
+	}
 
 	//
 	// Render trees.
@@ -694,8 +736,8 @@ PlatformUpdate_t(PlatformUpdate)
 			Chunk* chunk = get_chunk(state, { chunk_ix * CHUNK_DIM, chunk_iy * CHUNK_DIM });
 			FOR_ELEMS(it, chunk->tree_buffer, chunk->tree_count)
 			{
-				draw_rect_outline(&screen, screen_coords_of(it->coords, { 0.0f, 0.0f, 0.0f }), vxx(vf2 { 1.0f, 1.0f } * PIXELS_PER_METER), rgba_from(0.1f, 0.3f, 0.1f));
-				draw_bmp(&screen, &state->bmp.trees[it->bmp_index], screen_coords_of(it->coords, { 0.0f, 0.0f, 0.0f }) - vxx(state->bmp.trees[it->bmp_index].dims * vf2 { 0.0f, -0.175f }));
+				draw_rect_outline(screen, screen_coords_of(it->coords, { 0.0f, 0.0f, 0.0f }), vxx(vf2 { 1.0f, 1.0f } * PIXELS_PER_METER), rgba_from(0.1f, 0.3f, 0.1f));
+				draw_bmp(screen, state->bmp.trees[it->bmp_index], screen_coords_of(it->coords, { 0.0f, 0.0f, 0.0f }) - vxx(state->bmp.trees[it->bmp_index].dims * vf2 { 0.0f, -0.175f }));
 			}
 		}
 	}
@@ -704,27 +746,27 @@ PlatformUpdate_t(PlatformUpdate)
 	// Render pressure plate.
 	//
 
-	draw_rect_outline(&screen, screen_coords_of(state->pressure_plate.coords, { 0.0f, 0.0f, 0.0f }), vxx(vf2 { 1.0f, 1.0f } * PIXELS_PER_METER), rgba_from(0.25f, 0.25f, 0.25f));
-	draw_bmp(&screen, &state->bmp.pressure_plate, screen_coords_of(state->pressure_plate.coords, { 0.0f, 0.0f, 0.0f }), state->pressure_plate.pressed ? 1.0f : 0.5f);
+	draw_rect_outline(screen, screen_coords_of(state->pressure_plate.coords, { 0.0f, 0.0f, 0.0f }), vxx(vf2 { 1.0f, 1.0f } * PIXELS_PER_METER), rgba_from(0.25f, 0.25f, 0.25f));
+	draw_bmp(screen, state->bmp.pressure_plate, screen_coords_of(state->pressure_plate.coords, { 0.0f, 0.0f, 0.0f }), state->pressure_plate.pressed ? 1.0f : 0.5f);
 
 	//
 	// Render hero.
 	//
 
-	draw_rect_outline(&screen, screen_coords_of(state->hero.coords, { 0.0f, 0.0f, 0.0f }), vxx(vf2 { 1.0f, 1.0f } * PIXELS_PER_METER), rgba_from(0.1f, 0.2f, 0.3f));
-	draw_bmp(&screen, &state->bmp.hero_shadow                      , screen_coords_of(state->hero.coords, vxn(state->hero.rel_pos.xy, 0.0f)) - vxx(state->bmp.hero_shadow                      .dims * vf2 { 0.0f, -0.3f }));
-	draw_bmp(&screen, &state->bmp.hero_torsos[state->hero.cardinal], screen_coords_of(state->hero.coords,     state->hero.rel_pos          ) - vxx(state->bmp.hero_torsos[state->hero.cardinal].dims * vf2 { 0.0f, -0.3f }));
-	draw_bmp(&screen, &state->bmp.hero_capes [state->hero.cardinal], screen_coords_of(state->hero.coords,     state->hero.rel_pos          ) - vxx(state->bmp.hero_capes [state->hero.cardinal].dims * vf2 { 0.0f, -0.3f }));
-	draw_bmp(&screen, &state->bmp.hero_heads [state->hero.cardinal], screen_coords_of(state->hero.coords,     state->hero.rel_pos          ) - vxx(state->bmp.hero_heads [state->hero.cardinal].dims * vf2 { 0.0f, -0.3f }));
+	draw_rect_outline(screen, screen_coords_of(state->hero.coords, { 0.0f, 0.0f, 0.0f }), vxx(vf2 { 1.0f, 1.0f } * PIXELS_PER_METER), rgba_from(0.1f, 0.2f, 0.3f));
+	draw_bmp(screen, state->bmp.hero_shadow                      , screen_coords_of(state->hero.coords, vxn(state->hero.rel_pos.xy, 0.0f)) - vxx(state->bmp.hero_shadow                      .dims * vf2 { 0.0f, -0.3f }));
+	draw_bmp(screen, state->bmp.hero_torsos[state->hero.cardinal], screen_coords_of(state->hero.coords,     state->hero.rel_pos          ) - vxx(state->bmp.hero_torsos[state->hero.cardinal].dims * vf2 { 0.0f, -0.3f }));
+	draw_bmp(screen, state->bmp.hero_capes [state->hero.cardinal], screen_coords_of(state->hero.coords,     state->hero.rel_pos          ) - vxx(state->bmp.hero_capes [state->hero.cardinal].dims * vf2 { 0.0f, -0.3f }));
+	draw_bmp(screen, state->bmp.hero_heads [state->hero.cardinal], screen_coords_of(state->hero.coords,     state->hero.rel_pos          ) - vxx(state->bmp.hero_heads [state->hero.cardinal].dims * vf2 { 0.0f, -0.3f }));
 	draw_hp(state->hero.coords, state->hero.hp);
 
 	//
 	// Render pet.
 	//
 
-	draw_rect_outline(&screen, screen_coords_of(state->pet.coords, { 0.0f, 0.0f, 0.0f }), vxx(vf2 { 1.0f, 1.0f } * PIXELS_PER_METER), rgba_from(0.1f, 0.3f, 0.3f));
-	draw_bmp(&screen, &state->bmp.hero_shadow                     , screen_coords_of(state->pet.coords, vxn(state->pet.rel_pos.xy, 0.0f)) - vxx(state->bmp.hero_shadow                     .dims * vf2 { 0.0f, -0.300f }));
-	draw_bmp(&screen, &state->bmp.hero_heads [state->pet.cardinal], screen_coords_of(state->pet.coords,     state->pet.rel_pos          ) - vxx(state->bmp.hero_heads [state->pet.cardinal].dims * vf2 { 0.0f,  0.025f}));
+	draw_rect_outline(screen, screen_coords_of(state->pet.coords, { 0.0f, 0.0f, 0.0f }), vxx(vf2 { 1.0f, 1.0f } * PIXELS_PER_METER), rgba_from(0.1f, 0.3f, 0.3f));
+	draw_bmp(screen, state->bmp.hero_shadow                     , screen_coords_of(state->pet.coords, vxn(state->pet.rel_pos.xy, 0.0f)) - vxx(state->bmp.hero_shadow                     .dims * vf2 { 0.0f, -0.300f }));
+	draw_bmp(screen, state->bmp.hero_heads [state->pet.cardinal], screen_coords_of(state->pet.coords,     state->pet.rel_pos          ) - vxx(state->bmp.hero_heads [state->pet.cardinal].dims * vf2 { 0.0f,  0.025f}));
 
 	//
 	// Render monstar.
@@ -732,12 +774,12 @@ PlatformUpdate_t(PlatformUpdate)
 
 	if (state->monstar.existence_t != 0.0f)
 	{
-		draw_rect_outline(&screen, screen_coords_of(state->monstar.coords, { 0.0f, 0.0f, 0.0f }), vxx(vf2 { 1.0f, 1.0f } * PIXELS_PER_METER), rgba_from(0.3f, 0.1f, 0.1f));
-		draw_bmp(&screen, &state->bmp.hero_shadow                         , screen_coords_of(state->monstar.coords, vxn(state->monstar.rel_pos.xy, 0.0f)) - vxx(state->bmp.hero_shadow                          .dims * vf2 { 0.0f, -0.3f }));
-		draw_bmp(&screen, &state->bmp.hero_torsos[state->monstar.cardinal], screen_coords_of(state->monstar.coords,     state->monstar.rel_pos          ) - vxx(state->bmp.hero_torsos [state->monstar.cardinal].dims * vf2 { 0.0f, -0.3f }));
+		draw_rect_outline(screen, screen_coords_of(state->monstar.coords, { 0.0f, 0.0f, 0.0f }), vxx(vf2 { 1.0f, 1.0f } * PIXELS_PER_METER), rgba_from(0.3f, 0.1f, 0.1f));
+		draw_bmp(screen, state->bmp.hero_shadow                         , screen_coords_of(state->monstar.coords, vxn(state->monstar.rel_pos.xy, 0.0f)) - vxx(state->bmp.hero_shadow                          .dims * vf2 { 0.0f, -0.3f }));
+		draw_bmp(screen, state->bmp.hero_torsos[state->monstar.cardinal], screen_coords_of(state->monstar.coords,     state->monstar.rel_pos          ) - vxx(state->bmp.hero_torsos [state->monstar.cardinal].dims * vf2 { 0.0f, -0.3f }));
 		if (+(state->monstar.flag & MonstarFlag::attractive))
 		{
-			draw_bmp(&screen, &state->bmp.hero_capes[state->monstar.cardinal], screen_coords_of(state->monstar.coords, state->monstar.rel_pos) - vxx(state->bmp.hero_capes [state->monstar.cardinal].dims * vf2 { 0.0f, -0.3f }));
+			draw_bmp(screen, state->bmp.hero_capes[state->monstar.cardinal], screen_coords_of(state->monstar.coords, state->monstar.rel_pos) - vxx(state->bmp.hero_capes [state->monstar.cardinal].dims * vf2 { 0.0f, -0.3f }));
 		}
 		draw_hp(state->monstar.coords, state->monstar.hp);
 	}
