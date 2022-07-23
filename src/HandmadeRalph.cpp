@@ -137,24 +137,6 @@ procedure void draw_rect(BMP* dst, vi2 center, vi2 dims, u32 rgba)
 	}
 }
 
-procedure void draw_rect(BMP* dst, vi2 center, vi2 dims, vf4 rgba)
-{
-	ASSERT(IN_RANGE(dims.x, 0, 2048));
-	ASSERT(IN_RANGE(dims.y, 0, 2048));
-	vi2 start = { center.x - dims.x / 2, dst->dims.y - center.y - dims.y / 2 };
-	FOR_RANGE(y, max(start.y, 0), min(start.y + dims.y, dst->dims.y))
-	{
-		FOR_RANGE(x, max(start.x, 0), min(start.x + dims.x, dst->dims.x))
-		{
-			aliasing bot = dst->rgba[y * dst->dims.x + x];
-			bot =
-				(static_cast<u32>(static_cast<u8>(lerp(static_cast<f32>((bot >> 16) & 255), rgba.x * 255.0f, rgba.w))) << 16) |
-				(static_cast<u32>(static_cast<u8>(lerp(static_cast<f32>((bot >>  8) & 255), rgba.y * 255.0f, rgba.w))) <<  8) |
-				(static_cast<u32>(static_cast<u8>(lerp(static_cast<f32>((bot >>  0) & 255), rgba.z * 255.0f, rgba.w))) <<  0);
-		}
-	}
-}
-
 procedure void draw_rect_outline(BMP* dst, vi2 center, vi2 dims, u32 rgba)
 {
 	constexpr i32 THICKNESS = 4;
@@ -174,10 +156,10 @@ procedure void draw_bmp(BMP* dst, BMP* src, vi2 center, f32 alpha = 1.0f)
 			aliasing bot = dst->rgba[y * dst->dims.x + x];
 			aliasing top = src->rgba[(y - start.y) * src->dims.x + x - start.x];
 			bot =
-				(static_cast<u32>(lerp(static_cast<f32>((bot >> 24) & 255), static_cast<f32>((top >> 24) & 255), ((top >> 24) & 255) / 255.0f * alpha)) << 24) |
-				(static_cast<u32>(lerp(static_cast<f32>((bot >> 16) & 255), static_cast<f32>((top >> 16) & 255), ((top >> 24) & 255) / 255.0f * alpha)) << 16) |
-				(static_cast<u32>(lerp(static_cast<f32>((bot >>  8) & 255), static_cast<f32>((top >>  8) & 255), ((top >> 24) & 255) / 255.0f * alpha)) <<  8) |
-				(static_cast<u32>(lerp(static_cast<f32>((bot >>  0) & 255), static_cast<f32>((top >>  0) & 255), ((top >> 24) & 255) / 255.0f * alpha)) <<  0);
+				(static_cast<u32>((1.0f - static_cast<f32>((top >> 24) & 0xFF) / 255.0f) * static_cast<f32>((bot >> 24) & 0xFF) + static_cast<f32>((top >> 24) & 0xFF)) << 24) |
+				(static_cast<u32>((1.0f - static_cast<f32>((top >> 24) & 0xFF) / 255.0f) * static_cast<f32>((bot >> 16) & 0xFF) + static_cast<f32>((top >> 16) & 0xFF)) << 16) |
+				(static_cast<u32>((1.0f - static_cast<f32>((top >> 24) & 0xFF) / 255.0f) * static_cast<f32>((bot >>  8) & 0xFF) + static_cast<f32>((top >>  8) & 0xFF)) <<  8) |
+				(static_cast<u32>((1.0f - static_cast<f32>((top >> 24) & 0xFF) / 255.0f) * static_cast<f32>((bot >>  0) & 0xFF) + static_cast<f32>((top >>  0) & 0xFF)) <<  0);
 		}
 	}
 }
@@ -326,11 +308,13 @@ PlatformUpdate_t(PlatformUpdate)
 				FOR_RANGE(x, header.dims.x)
 				{
 					aliasing bmp_pixel = reinterpret_cast<u32*>(file_data.data + header.pixel_data_offset)[y * header.dims.x + x];
+					u32 a  = ((bmp_pixel & header.mask_a) << lz_a) >> 24;
+					f32 af = static_cast<f32>(a) / 255.0f;
 					bmp->rgba[(header.dims.y - 1 - y) * bmp->dims.x + x] =
-						((((bmp_pixel & header.mask_a) << lz_a) >> 24) << 24) |
-						((((bmp_pixel & header.mask_r) << lz_r) >> 24) << 16) |
-						((((bmp_pixel & header.mask_g) << lz_g) >> 24) <<  8) |
-						((((bmp_pixel & header.mask_b) << lz_b) >> 24) <<  0);
+						(a << 24) |
+						(static_cast<u32>(static_cast<f32>(((bmp_pixel & header.mask_r) << lz_r) >> 24) * af) << 16) |
+						(static_cast<u32>(static_cast<f32>(((bmp_pixel & header.mask_g) << lz_g) >> 24) * af) <<  8) |
+						(static_cast<u32>(static_cast<f32>(((bmp_pixel & header.mask_b) << lz_b) >> 24) * af) <<  0);
 				}
 			}
 		}
@@ -355,7 +339,7 @@ PlatformUpdate_t(PlatformUpdate)
 					rng(&state->seed) < 0.5f
 						? rng(&state->seed, state->bmp.grounds)
 						: rng(&state->seed, state->bmp.grasses),
-					state->cached_ground.dims / 2 + vxx(polar(rng(&state->seed, TAU)) * sqrtf(rng(&state->seed)) * RADIUS * PIXELS_PER_METER)
+					state->cached_ground.dims / 2 + vxx(vf2 { rng(&state->seed, -RADIUS, RADIUS), rng(&state->seed, -RADIUS, RADIUS) } * PIXELS_PER_METER)
 				);
 			}
 			FOR_RANGE(i, SAMPLES)
@@ -364,7 +348,7 @@ PlatformUpdate_t(PlatformUpdate)
 				(
 					&state->cached_ground,
 					rng(&state->seed, state->bmp.tufts),
-					state->cached_ground.dims / 2 + vxx(polar(rng(&state->seed, TAU)) * sqrtf(rng(&state->seed)) * RADIUS * PIXELS_PER_METER)
+					state->cached_ground.dims / 2 + vxx(vf2 { rng(&state->seed, -RADIUS, RADIUS), rng(&state->seed, -RADIUS, RADIUS) } * PIXELS_PER_METER)
 				);
 			}
 		}
