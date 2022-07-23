@@ -38,8 +38,6 @@ typedef double         f64;
 #define MACRO_OVERLOADED_3_(_0, _1, _2, MACRO, ...)     MACRO
 #define MACRO_OVERLOADED_4_(_0, _1, _2, _3, MACRO, ...) MACRO
 
-#define ARRAY_CAPACITY(XS)                  (sizeof(XS) / sizeof((XS)[0]))
-
 #define FOR_RANGE_3_(NAME, MINI, MAXI)      for (std::remove_const<std::remove_reference<decltype(MAXI)>::type>::type NAME = (MINI); NAME < (MAXI); NAME += 1)
 #define FOR_RANGE_2_(NAME, MAXI)            FOR_RANGE_3_(NAME, 0, (MAXI))
 #define FOR_RANGE_1_(MAXI)                  FOR_RANGE_2_(MACRO_CONCAT(FOR_RANGE, __LINE__), (MAXI))
@@ -50,13 +48,13 @@ typedef double         f64;
 #define FOR_RANGE_REV(...)                  MACRO_EXPAND_(MACRO_OVERLOADED_3_(__VA_ARGS__, FOR_RANGE_REV_3_, FOR_RANGE_REV_2_, FOR_RANGE_REV_1_)(__VA_ARGS__))
 
 #define FOR_ELEMS_3_(NAME, XS, COUNT)       FOR_RANGE(MACRO_CONCAT(NAME, _index), 0, (COUNT)) if (const auto NAME = &(XS)[MACRO_CONCAT(NAME, _index)]; false); else
-#define FOR_ELEMS_2_(NAME, XS)              FOR_ELEMS_3_(NAME, (XS), ARRAY_CAPACITY(XS))
-#define FOR_ELEMS_1_(XS)                    FOR_ELEMS_3_(it  , (XS), ARRAY_CAPACITY(XS))
+#define FOR_ELEMS_2_(NAME, XS)              FOR_ELEMS_3_(NAME, (XS), capacityof(XS))
+#define FOR_ELEMS_1_(XS)                    FOR_ELEMS_3_(it  , (XS), capacityof(XS))
 #define FOR_ELEMS(...)                      MACRO_EXPAND_(MACRO_OVERLOADED_3_(__VA_ARGS__, FOR_ELEMS_3_, FOR_ELEMS_2_, FOR_ELEMS_1_)(__VA_ARGS__))
 
 #define FOR_ELEMS_REV_3_(NAME, XS, COUNT)   FOR_RANGE_REV(MACRO_CONCAT(NAME, _index), 0, (COUNT)) if (const auto NAME = &(XS)[MACRO_CONCAT(NAME, _index)]; false); else
-#define FOR_ELEMS_REV_2_(NAME, XS)          FOR_ELEMS_REV_3_(NAME, (XS), ARRAY_CAPACITY(XS))
-#define FOR_ELEMS_REV_1_(XS)                FOR_ELEMS_REV_3_(it  , (XS), ARRAY_CAPACITY(XS))
+#define FOR_ELEMS_REV_2_(NAME, XS)          FOR_ELEMS_REV_3_(NAME, (XS), capacityof(XS))
+#define FOR_ELEMS_REV_1_(XS)                FOR_ELEMS_REV_3_(it  , (XS), capacityof(XS))
 #define FOR_ELEMS_REV(...)                  MACRO_EXPAND_(MACRO_OVERLOADED_3_(__VA_ARGS__, FOR_ELEMS_REV_3_, FOR_ELEMS_REV_2_, FOR_ELEMS_REV_1_)(__VA_ARGS__))
 
 #define FOR_NODES_2_(NAME, NODES)           if (auto MACRO_CONCAT(NAME, __LINE__) = (NODES); false); else for (i32 MACRO_CONCAT(NAME, _index) = 0; (void) MACRO_CONCAT(NAME, _index), MACRO_CONCAT(NAME, __LINE__); MACRO_CONCAT(NAME, _index) += 1, MACRO_CONCAT(NAME, __LINE__) = MACRO_CONCAT(NAME, __LINE__)->next) if (const auto NAME = MACRO_CONCAT(NAME, __LINE__))
@@ -222,25 +220,28 @@ procedure DEFER_<F> operator+(DEFER_EMPTY_, F&& f)
 	return DEFER_<F>(std::forward<F>(f));
 }
 
+template <typename TYPE, size_t SIZE>
+procedure constexpr i64 capacityof(TYPE (&xs)[SIZE]) { return static_cast<i64>(SIZE); }
+
 //
 // Memory.
 //
 
-#define DEFER_ARENA_RESET(ARENA) u64 MACRO_CONCAT(DEFER_ARENA_RESET, __LINE__) = (ARENA)->used; DEFER { (ARENA)->used = MACRO_CONCAT(DEFER_ARENA_RESET, __LINE__); }
+#define DEFER_ARENA_RESET(ARENA) i64 MACRO_CONCAT(DEFER_ARENA_RESET, __LINE__) = (ARENA)->used; DEFER { (ARENA)->used = MACRO_CONCAT(DEFER_ARENA_RESET, __LINE__); }
 
 struct MemoryArena
 {
-	u64   used;
-	u64   size;
+	i64   used;
+	i64   size;
 	byte* data;
 };
 
 template <typename TYPE>
-procedure TYPE* allocate(MemoryArena* arena, const u64& count = 1)
+procedure TYPE* allocate(MemoryArena* arena, const i64& count = 1)
 {
-	if (arena && arena->data && sizeof(TYPE) * count <= arena->size - arena->used)
+	if (arena && arena->data && static_cast<i64>(sizeof(TYPE)) * count <= arena->size - arena->used)
 	{
-		arena->used += sizeof(TYPE) * count;
+		arena->used += static_cast<i64>(sizeof(TYPE)) * count;
 		return reinterpret_cast<TYPE*>(arena->data + arena->size - arena->used);
 	}
 	else
@@ -551,6 +552,7 @@ procedure vf3 normalize(const vf3& v) { return v / norm(v); }
 procedure vf4 normalize(const vf4& v) { return v / norm(v); }
 
 procedure constexpr i32 mod(const i32& x, const i32& m) { return (x % m + m) % m; }
+procedure constexpr i64 mod(const i64& x, const i64& m) { return (x % m + m) % m; }
 procedure           f32 mod(const f32& x, const f32& m) { f32 y = fmodf(x, m); return y < 0.0f ? y + m : y; }
 
 procedure f32 atan2(const vf2& v) { return atan2f(v.y, v.x); }
@@ -587,35 +589,35 @@ procedure constexpr char   lowercase(const char& c) { return IN_RANGE(c, 'A', 'Z
 
 struct String
 {
-	u64         size;
+	i64         size;
 	const char* data;
 };
 
-procedure constexpr bool32 operator+ (const String& str                 ) { return str.size && str.data; }
-procedure constexpr bool32 operator==(const String& a  , const String& b) { return a.size == b.size && memcmp(a.data, b.data, static_cast<size_t>(a.size)) == 0; }
+procedure constexpr bool32 operator+ (const String& str                 ) { return str.size > 0; }
+procedure constexpr bool32 operator==(const String& a  , const String& b) { return a.size > 0 && a.size == b.size && memcmp(a.data, b.data, static_cast<size_t>(a.size)) == 0; }
 procedure constexpr bool32 operator!=(const String& a  , const String& b) { return !(a == b); }
 
-procedure constexpr String ltrunc(const String& str, const u64& maximum_length)
+procedure constexpr String ltrunc(const String& str, const i64& maximum_length)
 {
 	return { .size = min(str.size, maximum_length), .data = str.data };
 }
 
-procedure constexpr String rtrunc(const String& str, const u64& maximum_length)
+procedure constexpr String rtrunc(const String& str, const i64& maximum_length)
 {
 	return { .size = min(str.size, maximum_length), .data = str.data + str.size - min(str.size, maximum_length) };
 }
 
-procedure constexpr String ltrim(const String& str, const u64& offset)
+procedure constexpr String ltrim(const String& str, const i64& offset)
 {
-	return { str.size - min(offset, str.size), str.data + min(offset, str.size) };
+	return { max(str.size - offset, 0LL), str.data + min(offset, str.size) };
 }
 
-procedure constexpr String rtrim(const String& str, const u64& offset)
+procedure constexpr String rtrim(const String& str, const i64& offset)
 {
-	return { str.size - min(offset, str.size), str.data };
+	return { max(str.size - offset, 0LL), str.data };
 }
 
-procedure constexpr String trim(const String& str, const u64& loffset, const u64& roffset)
+procedure constexpr String trim(const String& str, const i64& loffset, const i64& roffset)
 {
 	return ltrim(rtrim(str, loffset), roffset);
 }
@@ -659,14 +661,14 @@ procedure constexpr String trim_whitespace(const String& str)
 	return ltrim_whitespace(rtrim_whitespace(str));
 }
 
-procedure constexpr bool32 is_char_at(const String& str, u64 index, char c)
+procedure constexpr bool32 is_char_at(const String& str, i64 index, char c)
 {
-	return index < str.size && str.data[index] == c;
+	return IN_RANGE(index, 0, str.size) && str.data[index] == c;
 }
 
-procedure constexpr bool32 is_whitespace_at(const String& str, u64 index)
+procedure constexpr bool32 is_whitespace_at(const String& str, i64 index)
 {
-	return index < str.size && is_whitespace(str.data[index]);
+	return IN_RANGE(index, 0, str.size) && is_whitespace(str.data[index]);
 }
 
 #pragma clang diagnostic pop

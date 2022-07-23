@@ -2,7 +2,9 @@
 #include "platform.h"
 #include "rng.cpp"
 
-constexpr i32 CHUNK_DIM = 16;
+constexpr i32 CHUNK_DIM        = 16;
+constexpr f32 PIXELS_PER_METER = 64.0f;
+constexpr f32 PIXELS_PER_Z     = 32.0f;
 
 struct BMP
 {
@@ -94,18 +96,23 @@ struct State
 	{
 		struct
 		{
-			BMP hero_heads [ARRAY_CAPACITY(META_Cardinal)]; // @META@ hero_left_head.bmp , hero_right_head.bmp , hero_front_head.bmp , hero_back_head.bmp
-			BMP hero_capes [ARRAY_CAPACITY(META_Cardinal)]; // @META@ hero_left_cape.bmp , hero_right_cape.bmp , hero_front_cape.bmp , hero_back_cape.bmp
-			BMP hero_torsos[ARRAY_CAPACITY(META_Cardinal)]; // @META@ hero_left_torso.bmp, hero_right_torso.bmp, hero_front_torso.bmp, hero_back_torso.bmp
-			BMP hero_shadow;                                // @META@ hero_shadow.bmp
-			BMP background;                                 // @META@ background.bmp
-			BMP rocks      [4];                             // @META@ rock00.bmp         , rock01.bmp          , rock02.bmp          , rock03.bmp
-			BMP trees      [3];                             // @META@ tree00.bmp         , tree01.bmp          , tree02.bmp
-			BMP pressure_plate;                             // @META@ grass00.bmp
+			BMP hero_heads      [capacityof(META_Cardinal)]; // @META@ hero_left_head.bmp , hero_right_head.bmp , hero_front_head.bmp , hero_back_head.bmp
+			BMP hero_capes      [capacityof(META_Cardinal)]; // @META@ hero_left_cape.bmp , hero_right_cape.bmp , hero_front_cape.bmp , hero_back_cape.bmp
+			BMP hero_torsos     [capacityof(META_Cardinal)]; // @META@ hero_left_torso.bmp, hero_right_torso.bmp, hero_front_torso.bmp, hero_back_torso.bmp
+			BMP hero_shadow;                                 // @META@ hero_shadow.bmp
+			BMP background;                                  // @META@ background.bmp
+			BMP rocks           [4];                         // @META@ rock00.bmp, rock01.bmp, rock02.bmp, rock03.bmp
+			BMP trees           [3];                         // @META@ tree00.bmp, tree01.bmp, tree02.bmp
+			BMP pressure_plate;                              // @META@ grass00.bmp
+			BMP grasses         [2];                         // @META@ grass00.bmp, grass01.bmp
+			BMP grounds         [4];                         // @META@ ground00.bmp, ground01.bmp, ground02.bmp, ground03.bmp
+			BMP tufts           [3];                         // @META@ tuft00.bmp, tuft01.bmp, tuft02.bmp
 		}   bmp;
 		BMP bmps[sizeof(bmp) / sizeof(BMP)];
 	};
 	#include "META/asset/bmp_file_paths.h"
+
+	BMP           cached_ground;
 
 	Chunk         chunk_hashtable[256];
 	Hero          hero;
@@ -113,82 +120,87 @@ struct State
 	Monstar       monstar;
 	PressurePlate pressure_plate;
 	vi2           camera_coords;
+	vf2           camera_rel_pos;
 };
 
-procedure void draw_rect(PlatformFramebuffer* platform_framebuffer, vi2 center, vi2 dims, u32 rgba)
+procedure void draw_rect(BMP* dst, vi2 center, vi2 dims, u32 rgba)
 {
 	ASSERT(IN_RANGE(dims.x, 0, 2048));
 	ASSERT(IN_RANGE(dims.y, 0, 2048));
-	FOR_RANGE(y, max(platform_framebuffer->dims.y - center.y - dims.y / 2, 0), min(platform_framebuffer->dims.y - center.y + dims.y / 2, platform_framebuffer->dims.y))
+	vi2 start = { center.x - dims.x / 2, dst->dims.y - center.y - dims.y / 2 };
+	FOR_RANGE(y, max(start.y, 0), min(start.y + dims.y, dst->dims.y))
 	{
-		FOR_RANGE(x, max(center.x - dims.x / 2, 0), min(center.x + dims.x / 2, platform_framebuffer->dims.x))
+		FOR_RANGE(x, max(start.x, 0), min(start.x + dims.x, dst->dims.x))
 		{
-			platform_framebuffer->pixels[y * platform_framebuffer->dims.x + x] = rgba;
+			dst->rgba[y * dst->dims.x + x] = rgba;
 		}
 	}
 }
 
-procedure void draw_rect(PlatformFramebuffer* platform_framebuffer, vi2 center, vi2 dims, vf4 rgba)
+procedure void draw_rect(BMP* dst, vi2 center, vi2 dims, vf4 rgba)
 {
 	ASSERT(IN_RANGE(dims.x, 0, 2048));
 	ASSERT(IN_RANGE(dims.y, 0, 2048));
-	FOR_RANGE(y, max(platform_framebuffer->dims.y - center.y - dims.y / 2, 0), min(platform_framebuffer->dims.y - center.y + dims.y / 2, platform_framebuffer->dims.y))
+	vi2 start = { center.x - dims.x / 2, dst->dims.y - center.y - dims.y / 2 };
+	FOR_RANGE(y, max(start.y, 0), min(start.y + dims.y, dst->dims.y))
 	{
-		FOR_RANGE(x, max(center.x - dims.x / 2, 0), min(center.x + dims.x / 2, platform_framebuffer->dims.x))
+		FOR_RANGE(x, max(start.x, 0), min(start.x + dims.x, dst->dims.x))
 		{
-			aliasing dst = platform_framebuffer->pixels[y * platform_framebuffer->dims.x + x];
-			dst =
-				(static_cast<u32>(static_cast<u8>(lerp(static_cast<f32>((dst >> 16) & 255), rgba.x * 255.0f, rgba.w))) << 16) |
-				(static_cast<u32>(static_cast<u8>(lerp(static_cast<f32>((dst >>  8) & 255), rgba.y * 255.0f, rgba.w))) <<  8) |
-				(static_cast<u32>(static_cast<u8>(lerp(static_cast<f32>((dst >>  0) & 255), rgba.z * 255.0f, rgba.w))) <<  0);
+			aliasing bot = dst->rgba[y * dst->dims.x + x];
+			bot =
+				(static_cast<u32>(static_cast<u8>(lerp(static_cast<f32>((bot >> 16) & 255), rgba.x * 255.0f, rgba.w))) << 16) |
+				(static_cast<u32>(static_cast<u8>(lerp(static_cast<f32>((bot >>  8) & 255), rgba.y * 255.0f, rgba.w))) <<  8) |
+				(static_cast<u32>(static_cast<u8>(lerp(static_cast<f32>((bot >>  0) & 255), rgba.z * 255.0f, rgba.w))) <<  0);
 		}
 	}
 }
 
-procedure void draw_bmp(PlatformFramebuffer* platform_framebuffer, BMP* bmp, vi2 center, f32 alpha = 1.0f)
+procedure void draw_rect_outline(BMP* dst, vi2 center, vi2 dims, u32 rgba)
 {
-	FOR_RANGE(y, max(platform_framebuffer->dims.y - center.y - bmp->dims.y / 2, 0), min(platform_framebuffer->dims.y - center.y + bmp->dims.y / 2, platform_framebuffer->dims.y))
-	{
-		FOR_RANGE(x, max(center.x - bmp->dims.x / 2, 0), min(center.x + bmp->dims.x / 2, platform_framebuffer->dims.x))
-		{
-			aliasing dst = platform_framebuffer->pixels[y * platform_framebuffer->dims.x + x];
-			aliasing top = bmp->rgba[(platform_framebuffer->dims.y - center.y + bmp->dims.y / 2 - y) * bmp->dims.x + x - center.x - bmp->dims.x / 2];
+	constexpr i32 THICKNESS = 4;
+	draw_rect(dst, center + vi2 { -dims.x / 2 + THICKNESS / 2,                           0 }, { THICKNESS,    dims.y }, rgba);
+	draw_rect(dst, center + vi2 {  dims.x / 2 - THICKNESS / 2,                           0 }, { THICKNESS,    dims.y }, rgba);
+	draw_rect(dst, center + vi2 {                           0, -dims.x / 2 + THICKNESS / 2 }, {    dims.x, THICKNESS }, rgba);
+	draw_rect(dst, center + vi2 {                           0,  dims.x / 2 - THICKNESS / 2 }, {    dims.x, THICKNESS }, rgba);
+}
 
-			if ((top >> 24) == 255 && alpha == 1.0f)
-			{
-				dst = top;
-			}
-			else if ((top >> 24) && alpha > 0.0f)
-			{
-				dst =
-					(static_cast<u32>(static_cast<u8>(static_cast<f32>((dst >> 16) & 255) * (1.0f - ((top >> 24) & 255) / 255.0f * alpha) + static_cast<f32>((top >> 16) & 255) * ((top >> 24) & 255) / 255.0f * alpha)) << 16) |
-					(static_cast<u32>(static_cast<u8>(static_cast<f32>((dst >>  8) & 255) * (1.0f - ((top >> 24) & 255) / 255.0f * alpha) + static_cast<f32>((top >>  8) & 255) * ((top >> 24) & 255) / 255.0f * alpha)) <<  8) |
-					(static_cast<u32>(static_cast<u8>(static_cast<f32>((dst >>  0) & 255) * (1.0f - ((top >> 24) & 255) / 255.0f * alpha) + static_cast<f32>((top >>  0) & 255) * ((top >> 24) & 255) / 255.0f * alpha)) <<  0);
-			}
+procedure void draw_bmp(BMP* dst, BMP* src, vi2 center, f32 alpha = 1.0f)
+{
+	vi2 start = { center.x - src->dims.x / 2, dst->dims.y - center.y - src->dims.y / 2 };
+	FOR_RANGE(y, max(start.y, 0), min(start.y + src->dims.y, dst->dims.y))
+	{
+		FOR_RANGE(x, max(start.x, 0), min(start.x + src->dims.x, dst->dims.x))
+		{
+			aliasing bot = dst->rgba[y * dst->dims.x + x];
+			aliasing top = src->rgba[(y - start.y) * src->dims.x + x - start.x];
+			bot =
+				(static_cast<u32>(lerp(static_cast<f32>((bot >> 24) & 255), static_cast<f32>((top >> 24) & 255), ((top >> 24) & 255) / 255.0f * alpha)) << 24) |
+				(static_cast<u32>(lerp(static_cast<f32>((bot >> 16) & 255), static_cast<f32>((top >> 16) & 255), ((top >> 24) & 255) / 255.0f * alpha)) << 16) |
+				(static_cast<u32>(lerp(static_cast<f32>((bot >>  8) & 255), static_cast<f32>((top >>  8) & 255), ((top >> 24) & 255) / 255.0f * alpha)) <<  8) |
+				(static_cast<u32>(lerp(static_cast<f32>((bot >>  0) & 255), static_cast<f32>((top >>  0) & 255), ((top >> 24) & 255) / 255.0f * alpha)) <<  0);
 		}
 	}
 }
 
-procedure void draw_circle(PlatformFramebuffer* platform_framebuffer, vi2 pos, i32 radius, u32 rgba)
+procedure void draw_circle(BMP* bmp, vi2 pos, i32 radius, u32 rgba)
 {
 	ASSERT(IN_RANGE(radius, 0, 128));
-	i32 x0          = clamp(                               pos.x - radius, 0, platform_framebuffer->dims.x);
-	i32 x1          = clamp(                               pos.x + radius, 0, platform_framebuffer->dims.x);
-	i32 y0          = clamp(platform_framebuffer->dims.y - pos.y - radius, 0, platform_framebuffer->dims.y);
-	i32 y1          = clamp(platform_framebuffer->dims.y - pos.y + radius, 0, platform_framebuffer->dims.y);
+	i32 x0 = clamp(              pos.x - radius, 0, bmp->dims.x);
+	i32 x1 = clamp(              pos.x + radius, 0, bmp->dims.x);
+	i32 y0 = clamp(bmp->dims.y - pos.y - radius, 0, bmp->dims.y);
+	i32 y1 = clamp(bmp->dims.y - pos.y + radius, 0, bmp->dims.y);
 
 	FOR_RANGE(x, x0, x1)
 	{
 		FOR_RANGE(y, y0, y1)
 		{
-			if (square(x - pos.x) + square(y - platform_framebuffer->dims.y + pos.y) <= square(radius))
+			if (square(x - pos.x) + square(y - bmp->dims.y + pos.y) <= square(radius))
 			{
-				platform_framebuffer->pixels[y * platform_framebuffer->dims.x + x] = rgba;
+				bmp->rgba[y * bmp->dims.x + x] = rgba;
 			}
 		}
 	}
 }
-
 procedure u32 rgba_from(f32 r, f32 g, f32 b)
 {
 	return ((static_cast<u32>(r * 255.0f) << 16)) | ((static_cast<u32>(g * 255.0f) <<  8)) | ((static_cast<u32>(b * 255.0f) <<  0));
@@ -207,9 +219,9 @@ procedure Chunk* get_chunk(State* state, vi2 coords)
 			CHUNK_DIM * (coords.y / CHUNK_DIM + (coords.y < 0 && coords.y % CHUNK_DIM ? -1 : 0))
 		};
 
-	i32 hash = mod(chunk_coords.x * 17 + chunk_coords.y * 13 - 19, ARRAY_CAPACITY(state->chunk_hashtable));
+	i64 hash = mod(static_cast<i64>(chunk_coords.x * 17 + chunk_coords.y * 13 - 19), capacityof(state->chunk_hashtable));
 
-	FOR_RANGE(ARRAY_CAPACITY(state->chunk_hashtable))
+	FOR_RANGE(capacityof(state->chunk_hashtable))
 	{
 		if (!state->chunk_hashtable[hash].exists)
 		{
@@ -221,7 +233,7 @@ procedure Chunk* get_chunk(State* state, vi2 coords)
 			return &state->chunk_hashtable[hash];
 		}
 
-		hash = mod(hash + 1, ARRAY_CAPACITY(state->chunk_hashtable));
+		hash = mod(hash + 1, capacityof(state->chunk_hashtable));
 	}
 
 	return 0;
@@ -239,6 +251,10 @@ PlatformUpdate_t(PlatformUpdate)
 				.size = PLATFORM_MEMORY_SIZE - sizeof(State),
 				.data = platform_memory      + sizeof(State)
 			};
+
+		//
+		// Load BMPs.
+		//
 
 		FOR_ELEMS(bmp, state->bmps)
 		{
@@ -298,7 +314,7 @@ PlatformUpdate_t(PlatformUpdate)
 			}
 
 			bmp->dims = header.dims;
-			bmp->rgba = allocate<u32>(&state->arena, static_cast<u64>(bmp->dims.x * bmp->dims.y));
+			bmp->rgba = allocate<u32>(&state->arena, bmp->dims.x * bmp->dims.y);
 
 			// @TODO@ Microsoft specific intrinsic...
 			u32 lz_r = __lzcnt(header.mask_r);
@@ -310,7 +326,7 @@ PlatformUpdate_t(PlatformUpdate)
 				FOR_RANGE(x, header.dims.x)
 				{
 					aliasing bmp_pixel = reinterpret_cast<u32*>(file_data.data + header.pixel_data_offset)[y * header.dims.x + x];
-					bmp->rgba[y * bmp->dims.x + x] =
+					bmp->rgba[(header.dims.y - 1 - y) * bmp->dims.x + x] =
 						((((bmp_pixel & header.mask_a) << lz_a) >> 24) << 24) |
 						((((bmp_pixel & header.mask_r) << lz_r) >> 24) << 16) |
 						((((bmp_pixel & header.mask_g) << lz_g) >> 24) <<  8) |
@@ -318,6 +334,45 @@ PlatformUpdate_t(PlatformUpdate)
 				}
 			}
 		}
+
+		//
+		// Generate ground.
+		//
+
+		{
+			state->cached_ground.dims = { 1024, 1024 };
+			state->cached_ground.rgba = allocate<u32>(&state->arena, state->cached_ground.dims.x * state->cached_ground.dims.y);
+			memset(state->cached_ground.rgba, 0, sizeof(u32) * static_cast<size_t>(state->cached_ground.dims.x * state->cached_ground.dims.y));
+
+			constexpr f32 RADIUS  = 4.0f;
+			constexpr i32 SAMPLES = 128;
+
+			FOR_RANGE(i, SAMPLES)
+			{
+				draw_bmp
+				(
+					&state->cached_ground,
+					rng(&state->seed) < 0.5f
+						? rng(&state->seed, state->bmp.grounds)
+						: rng(&state->seed, state->bmp.grasses),
+					state->cached_ground.dims / 2 + vxx(polar(rng(&state->seed, TAU)) * sqrtf(rng(&state->seed)) * RADIUS * PIXELS_PER_METER)
+				);
+			}
+			FOR_RANGE(i, SAMPLES)
+			{
+				draw_bmp
+				(
+					&state->cached_ground,
+					rng(&state->seed, state->bmp.tufts),
+					state->cached_ground.dims / 2 + vxx(polar(rng(&state->seed, TAU)) * sqrtf(rng(&state->seed)) * RADIUS * PIXELS_PER_METER)
+				);
+			}
+		}
+
+
+		//
+		// Initializes entities.
+		//
 
 		{
 			state->hero.coords = { 0, 0 };
@@ -346,7 +401,7 @@ PlatformUpdate_t(PlatformUpdate)
 			FOR_RANGE(chunk_ix, -4, 4)
 			{
 				Chunk* chunk = get_chunk(state, { chunk_ix * CHUNK_DIM, chunk_iy * CHUNK_DIM });
-				chunk->tree_count = rng(&state->seed, static_cast<i32>(ARRAY_CAPACITY(chunk->tree_buffer)) / 2, static_cast<i32>(ARRAY_CAPACITY(chunk->tree_buffer)));
+				chunk->tree_count = rng(&state->seed, static_cast<i32>(capacityof(chunk->tree_buffer)) / 2, static_cast<i32>(capacityof(chunk->tree_buffer)));
 				FOR_ELEMS(it, chunk->tree_buffer, chunk->tree_count)
 				{
 					do
@@ -356,7 +411,7 @@ PlatformUpdate_t(PlatformUpdate)
 					while (chunk->tiles[it->coords.y - chunk->coords.y][it->coords.x - chunk->coords.x].entity.ref_type != EntityType::null);
 					chunk->tiles[it->coords.y - chunk->coords.y][it->coords.x - chunk->coords.x].entity = ref(it);
 
-					it->bmp_index = rng(&state->seed, 0, ARRAY_CAPACITY(state->bmp.trees));
+					it->bmp_index = static_cast<i32>(rng(&state->seed, capacityof(state->bmp.trees)));
 				}
 			}
 		}
@@ -370,25 +425,25 @@ PlatformUpdate_t(PlatformUpdate)
 		[&](EntityRef entity, Cardinal movement)
 		{
 			vi2* coords;
-			vf3* rel_pos;
+			//vf3* rel_pos;
 			switch (entity.ref_type)
 			{
 				case EntityType::Hero:
 				{
 					coords  = &entity.Hero_->coords;
-					rel_pos = &entity.Hero_->rel_pos;
+					//rel_pos = &entity.Hero_->rel_pos;
 				} break;
 
 				case EntityType::Pet:
 				{
 					coords  = &entity.Pet_->coords;
-					rel_pos = &entity.Pet_->rel_pos;
+					//rel_pos = &entity.Pet_->rel_pos;
 				} break;
 
 				case EntityType::Monstar:
 				{
 					coords  = &entity.Monstar_->coords;
-					rel_pos = &entity.Monstar_->rel_pos;
+					//rel_pos = &entity.Monstar_->rel_pos;
 				} break;
 
 				case EntityType::null:
@@ -604,19 +659,23 @@ PlatformUpdate_t(PlatformUpdate)
 	// Update camera.
 	//
 
-	state->camera_coords += HJKL_PRESSES();
+	{
+		vi2 delta_coords = HJKL_PRESSES();
+		state->camera_coords  += delta_coords;
+		state->camera_rel_pos -= delta_coords;
+		state->camera_rel_pos  = dampen(state->camera_rel_pos, { 0.0f, 0.0f }, 0.001f, platform_delta_time);
+	}
 
 	//
 	// Render.
 	//
 
-	constexpr f32 PIXELS_PER_METER = 64.0f;
-	constexpr f32 PIXELS_PER_Z     = 32.0f;
+	BMP screen = { platform_framebuffer->dims, platform_framebuffer->pixels };
 
 	lambda screen_coords_of =
 		[&](vi2 coords, vf3 rel_pos)
 		{
-			return vxx((coords - state->camera_coords + rel_pos.xy) * PIXELS_PER_METER + platform_framebuffer->dims / 2.0f + vf2 { 0.0f, rel_pos.z * PIXELS_PER_Z });
+			return vxx((coords - state->camera_coords + rel_pos.xy - state->camera_rel_pos) * PIXELS_PER_METER + screen.dims / 2.0f + vf2 { 0.0f, rel_pos.z * PIXELS_PER_Z });
 		};
 
 	lambda draw_hp =
@@ -627,7 +686,7 @@ PlatformUpdate_t(PlatformUpdate)
 				constexpr i32 HP_DIM = 10;
 				draw_rect
 				(
-					platform_framebuffer,
+					&screen,
 					screen_coords_of(coords, { 0.0f, 0.0f, 0.0f }) + vxx(vf2 { -HP_DIM * 2.0f * (static_cast<f32>(i) - static_cast<f32>(hp) / 2.0f + 0.5f), -25.0f }),
 					vx2(HP_DIM),
 					rgba_from(0.9f, 0.1f, 0.1f)
@@ -635,7 +694,9 @@ PlatformUpdate_t(PlatformUpdate)
 			}
 		};
 
-	memset(platform_framebuffer->pixels, 32, static_cast<u64>(platform_framebuffer->dims.x * platform_framebuffer->dims.y) * sizeof(u32));
+	memset(screen.rgba, 32, static_cast<u64>(screen.dims.x * screen.dims.y) * sizeof(u32));
+
+	draw_bmp(&screen, &state->cached_ground, screen.dims / 2);
 
 	//
 	// Render trees.
@@ -649,8 +710,8 @@ PlatformUpdate_t(PlatformUpdate)
 			Chunk* chunk = get_chunk(state, { chunk_ix * CHUNK_DIM, chunk_iy * CHUNK_DIM });
 			FOR_ELEMS(it, chunk->tree_buffer, chunk->tree_count)
 			{
-				draw_rect(platform_framebuffer, screen_coords_of(it->coords, { 0.0f, 0.0f, 0.0f }), vxx(vf2 { 1.0f, 1.0f } * PIXELS_PER_METER), rgba_from(0.1f, 0.3f, 0.1f));
-				draw_bmp(platform_framebuffer, &state->bmp.trees[it->bmp_index], screen_coords_of(it->coords, { 0.0f, 0.0f, 0.0f }) - vxx(state->bmp.trees[it->bmp_index].dims * vf2 { 0.0f, -0.175f }));
+				draw_rect_outline(&screen, screen_coords_of(it->coords, { 0.0f, 0.0f, 0.0f }), vxx(vf2 { 1.0f, 1.0f } * PIXELS_PER_METER), rgba_from(0.1f, 0.3f, 0.1f));
+				draw_bmp(&screen, &state->bmp.trees[it->bmp_index], screen_coords_of(it->coords, { 0.0f, 0.0f, 0.0f }) - vxx(state->bmp.trees[it->bmp_index].dims * vf2 { 0.0f, -0.175f }));
 			}
 		}
 	}
@@ -659,27 +720,27 @@ PlatformUpdate_t(PlatformUpdate)
 	// Render pressure plate.
 	//
 
-	draw_rect(platform_framebuffer, screen_coords_of(state->pressure_plate.coords, { 0.0f, 0.0f, 0.0f }), vxx(vf2 { 1.0f, 1.0f } * PIXELS_PER_METER), rgba_from(0.25f, 0.25f, 0.25f));
-	draw_bmp(platform_framebuffer, &state->bmp.pressure_plate, screen_coords_of(state->pressure_plate.coords, { 0.0f, 0.0f, 0.0f }), state->pressure_plate.pressed ? 1.0f : 0.5f);
+	draw_rect_outline(&screen, screen_coords_of(state->pressure_plate.coords, { 0.0f, 0.0f, 0.0f }), vxx(vf2 { 1.0f, 1.0f } * PIXELS_PER_METER), rgba_from(0.25f, 0.25f, 0.25f));
+	draw_bmp(&screen, &state->bmp.pressure_plate, screen_coords_of(state->pressure_plate.coords, { 0.0f, 0.0f, 0.0f }), state->pressure_plate.pressed ? 1.0f : 0.5f);
 
 	//
 	// Render hero.
 	//
 
-	draw_rect(platform_framebuffer, screen_coords_of(state->hero.coords, { 0.0f, 0.0f, 0.0f }), vxx(vf2 { 1.0f, 1.0f } * PIXELS_PER_METER), rgba_from(0.1f, 0.2f, 0.3f));
-	draw_bmp(platform_framebuffer, &state->bmp.hero_shadow                      , screen_coords_of(state->hero.coords, vxn(state->hero.rel_pos.xy, 0.0f)) - vxx(state->bmp.hero_shadow                      .dims * vf2 { 0.0f, -0.3f }));
-	draw_bmp(platform_framebuffer, &state->bmp.hero_torsos[state->hero.cardinal], screen_coords_of(state->hero.coords,     state->hero.rel_pos          ) - vxx(state->bmp.hero_torsos[state->hero.cardinal].dims * vf2 { 0.0f, -0.3f }));
-	draw_bmp(platform_framebuffer, &state->bmp.hero_capes [state->hero.cardinal], screen_coords_of(state->hero.coords,     state->hero.rel_pos          ) - vxx(state->bmp.hero_capes [state->hero.cardinal].dims * vf2 { 0.0f, -0.3f }));
-	draw_bmp(platform_framebuffer, &state->bmp.hero_heads [state->hero.cardinal], screen_coords_of(state->hero.coords,     state->hero.rel_pos          ) - vxx(state->bmp.hero_heads [state->hero.cardinal].dims * vf2 { 0.0f, -0.3f }));
+	draw_rect_outline(&screen, screen_coords_of(state->hero.coords, { 0.0f, 0.0f, 0.0f }), vxx(vf2 { 1.0f, 1.0f } * PIXELS_PER_METER), rgba_from(0.1f, 0.2f, 0.3f));
+	draw_bmp(&screen, &state->bmp.hero_shadow                      , screen_coords_of(state->hero.coords, vxn(state->hero.rel_pos.xy, 0.0f)) - vxx(state->bmp.hero_shadow                      .dims * vf2 { 0.0f, -0.3f }));
+	draw_bmp(&screen, &state->bmp.hero_torsos[state->hero.cardinal], screen_coords_of(state->hero.coords,     state->hero.rel_pos          ) - vxx(state->bmp.hero_torsos[state->hero.cardinal].dims * vf2 { 0.0f, -0.3f }));
+	draw_bmp(&screen, &state->bmp.hero_capes [state->hero.cardinal], screen_coords_of(state->hero.coords,     state->hero.rel_pos          ) - vxx(state->bmp.hero_capes [state->hero.cardinal].dims * vf2 { 0.0f, -0.3f }));
+	draw_bmp(&screen, &state->bmp.hero_heads [state->hero.cardinal], screen_coords_of(state->hero.coords,     state->hero.rel_pos          ) - vxx(state->bmp.hero_heads [state->hero.cardinal].dims * vf2 { 0.0f, -0.3f }));
 	draw_hp(state->hero.coords, state->hero.hp);
 
 	//
 	// Render pet.
 	//
 
-	draw_rect(platform_framebuffer, screen_coords_of(state->pet.coords, { 0.0f, 0.0f, 0.0f }), vxx(vf2 { 1.0f, 1.0f } * PIXELS_PER_METER), rgba_from(0.1f, 0.3f, 0.3f));
-	draw_bmp(platform_framebuffer, &state->bmp.hero_shadow                     , screen_coords_of(state->pet.coords, vxn(state->pet.rel_pos.xy, 0.0f)) - vxx(state->bmp.hero_shadow                     .dims * vf2 { 0.0f, -0.300f }));
-	draw_bmp(platform_framebuffer, &state->bmp.hero_heads [state->pet.cardinal], screen_coords_of(state->pet.coords,     state->pet.rel_pos          ) - vxx(state->bmp.hero_heads [state->pet.cardinal].dims * vf2 { 0.0f,  0.025f}));
+	draw_rect_outline(&screen, screen_coords_of(state->pet.coords, { 0.0f, 0.0f, 0.0f }), vxx(vf2 { 1.0f, 1.0f } * PIXELS_PER_METER), rgba_from(0.1f, 0.3f, 0.3f));
+	draw_bmp(&screen, &state->bmp.hero_shadow                     , screen_coords_of(state->pet.coords, vxn(state->pet.rel_pos.xy, 0.0f)) - vxx(state->bmp.hero_shadow                     .dims * vf2 { 0.0f, -0.300f }));
+	draw_bmp(&screen, &state->bmp.hero_heads [state->pet.cardinal], screen_coords_of(state->pet.coords,     state->pet.rel_pos          ) - vxx(state->bmp.hero_heads [state->pet.cardinal].dims * vf2 { 0.0f,  0.025f}));
 
 	//
 	// Render monstar.
@@ -687,12 +748,12 @@ PlatformUpdate_t(PlatformUpdate)
 
 	if (state->monstar.existence_t != 0.0f)
 	{
-		draw_rect(platform_framebuffer, screen_coords_of(state->monstar.coords, { 0.0f, 0.0f, 0.0f }), vxx(vf2 { 1.0f, 1.0f } * PIXELS_PER_METER), rgba_from(0.3f, 0.1f, 0.1f));
-		draw_bmp(platform_framebuffer, &state->bmp.hero_shadow                         , screen_coords_of(state->monstar.coords, vxn(state->monstar.rel_pos.xy, 0.0f)) - vxx(state->bmp.hero_shadow                          .dims * vf2 { 0.0f, -0.3f }));
-		draw_bmp(platform_framebuffer, &state->bmp.hero_torsos[state->monstar.cardinal], screen_coords_of(state->monstar.coords,     state->monstar.rel_pos          ) - vxx(state->bmp.hero_torsos [state->monstar.cardinal].dims * vf2 { 0.0f, -0.3f }));
+		draw_rect_outline(&screen, screen_coords_of(state->monstar.coords, { 0.0f, 0.0f, 0.0f }), vxx(vf2 { 1.0f, 1.0f } * PIXELS_PER_METER), rgba_from(0.3f, 0.1f, 0.1f));
+		draw_bmp(&screen, &state->bmp.hero_shadow                         , screen_coords_of(state->monstar.coords, vxn(state->monstar.rel_pos.xy, 0.0f)) - vxx(state->bmp.hero_shadow                          .dims * vf2 { 0.0f, -0.3f }));
+		draw_bmp(&screen, &state->bmp.hero_torsos[state->monstar.cardinal], screen_coords_of(state->monstar.coords,     state->monstar.rel_pos          ) - vxx(state->bmp.hero_torsos [state->monstar.cardinal].dims * vf2 { 0.0f, -0.3f }));
 		if (+(state->monstar.flag & MonstarFlag::attractive))
 		{
-			draw_bmp(platform_framebuffer, &state->bmp.hero_capes[state->monstar.cardinal], screen_coords_of(state->monstar.coords, state->monstar.rel_pos) - vxx(state->bmp.hero_capes [state->monstar.cardinal].dims * vf2 { 0.0f, -0.3f }));
+			draw_bmp(&screen, &state->bmp.hero_capes[state->monstar.cardinal], screen_coords_of(state->monstar.coords, state->monstar.rel_pos) - vxx(state->bmp.hero_capes [state->monstar.cardinal].dims * vf2 { 0.0f, -0.3f }));
 		}
 		draw_hp(state->monstar.coords, state->monstar.hp);
 	}

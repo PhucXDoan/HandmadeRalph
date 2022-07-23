@@ -65,7 +65,7 @@ procedure PlatformReadFileData_t(PlatformReadFileData)
 {
 	wchar_t wide_file_path[256];
 	u64     wide_file_path_count;
-	if (mbstowcs_s(&wide_file_path_count, wide_file_path, platform_file_path.data, platform_file_path.size) || wide_file_path_count != platform_file_path.size + 1)
+	if (mbstowcs_s(&wide_file_path_count, wide_file_path, platform_file_path.data, static_cast<size_t>(platform_file_path.size)) || static_cast<i64>(wide_file_path_count) != platform_file_path.size + 1)
 	{
 		DEBUG_printf(__FILE__ " :: %s :: Failed to convert file path `%S` to wide string.\n", __func__, wide_file_path);
 		return {};
@@ -135,7 +135,7 @@ procedure PlatformWriteFile_t(PlatformWriteFile)
 {
 	wchar_t wide_file_path[256];
 	u64     wide_file_path_count;
-	if (mbstowcs_s(&wide_file_path_count, wide_file_path, platform_file_path.data, platform_file_path.size) || wide_file_path_count != platform_file_path.size + 1)
+	if (mbstowcs_s(&wide_file_path_count, wide_file_path, platform_file_path.data, static_cast<size_t>(platform_file_path.size)) || static_cast<i64>(wide_file_path_count) != platform_file_path.size + 1)
 	{
 		DEBUG_printf(__FILE__ " :: %s :: Failed to convert file path `%S` to wide string.\n", __func__, wide_file_path);
 		return {};

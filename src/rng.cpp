@@ -61,22 +61,30 @@ global constexpr f32 RAND_TABLE_NORMALIZER =
 
 procedure f32 rng(const u32& seed)
 {
-	return static_cast<f32>(RAND_TABLE[seed % ARRAY_CAPACITY(RAND_TABLE)]) / RAND_TABLE_NORMALIZER;
+	return static_cast<f32>(RAND_TABLE[seed % capacityof(RAND_TABLE)]) / RAND_TABLE_NORMALIZER;
 }
 
 procedure f32 rng(u32* seed)
 {
-	return static_cast<f32>(RAND_TABLE[++*seed % ARRAY_CAPACITY(RAND_TABLE)]) / RAND_TABLE_NORMALIZER;
+	return static_cast<f32>(RAND_TABLE[++*seed % capacityof(RAND_TABLE)]) / RAND_TABLE_NORMALIZER;
 }
 
-procedure i32 rng(u32* seed, const i32& start, const i32& end)
+template <typename TYPE>
+procedure TYPE rng(u32* seed, const TYPE& end)
 {
-	return static_cast<i32>(rng(seed) * static_cast<f32>(end - start) + static_cast<f32>(start));
+	return static_cast<TYPE>(rng(seed) * static_cast<f32>(end));
 }
 
-procedure f32 rng(u32* seed, const f32& start, const f32& end)
+template <typename TYPE>
+procedure TYPE rng(u32* seed, const TYPE& start, const TYPE& end)
 {
-	return rng(seed) * (end - start) + start;
+	return static_cast<TYPE>(rng(seed) * static_cast<f32>(end - start) + static_cast<f32>(start));
+}
+
+template <typename TYPE, u64 SIZE>
+procedure TYPE* rng(u32* seed, TYPE (&xs)[SIZE])
+{
+	return &xs[rng(seed, SIZE)];
 }
 
 #pragma clang diagnostic pop

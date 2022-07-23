@@ -35,12 +35,12 @@ procedure FilePathsInResult file_paths_in(String dir_path, MemoryArena* arena)
 {
 	wchar_t wide_dir_path[MAX_PATH];
 	u64     wide_dir_path_count;
-	if (mbstowcs_s(&wide_dir_path_count, wide_dir_path, dir_path.data, dir_path.size) || wide_dir_path_count != dir_path.size + 1)
+	if (mbstowcs_s(&wide_dir_path_count, wide_dir_path, dir_path.data, static_cast<size_t>(dir_path.size)) || static_cast<i64>(wide_dir_path_count) != dir_path.size + 1)
 	{
 		return {};
 	}
 
-	if (StringCchCatW(wide_dir_path, ARRAY_CAPACITY(wide_dir_path), L"/*") != S_OK)
+	if (StringCchCatW(wide_dir_path, capacityof(wide_dir_path), L"/*") != S_OK)
 	{
 		return {};
 	}
@@ -82,12 +82,12 @@ procedure FilePathsInResult file_paths_in(String dir_path, MemoryArena* arena)
 					{
 						return {};
 					}
-					if (StringCchCatW(wide_file_path, ARRAY_CAPACITY(wide_file_path), find_data.cFileName) != S_OK)
+					if (StringCchCatW(wide_file_path, capacityof(wide_file_path), find_data.cFileName) != S_OK)
 					{
 						return {};
 					}
 
-					char* file_path_data = allocate<char>(arena, wcslen(wide_file_path) + 1);
+					char* file_path_data = allocate<char>(arena, static_cast<i64>(wcslen(wide_file_path) + 1));
 					u64   file_path_count;
 					if (wcstombs_s(&file_path_count, file_path_data, wcslen(wide_file_path) + 1, wide_file_path, _TRUNCATE) || file_path_count != wcslen(wide_file_path) + 1)
 					{
@@ -100,7 +100,7 @@ procedure FilePathsInResult file_paths_in(String dir_path, MemoryArena* arena)
 							.next = file_names,
 							.str  =
 								{
-									.size = wcslen(wide_file_path),
+									.size = static_cast<i64>(wcslen(wide_file_path)),
 									.data = file_path_data
 								}
 						};
@@ -119,12 +119,12 @@ procedure FilePathsInResult file_paths_in(String dir_path, MemoryArena* arena)
 	}
 }
 
-procedure bool32 read(char** data, u64* size, String file_path, MemoryArena* arena)
+procedure bool32 read(char** data, i64* size, String file_path, MemoryArena* arena)
 {
 	HANDLE  handle;
 	wchar_t wide_file_path[MAX_PATH];
 	u64     wide_file_path_count;
-	if (mbstowcs_s(&wide_file_path_count, wide_file_path, file_path.data, file_path.size) || wide_file_path_count != file_path.size + 1)
+	if (mbstowcs_s(&wide_file_path_count, wide_file_path, file_path.data, static_cast<size_t>(file_path.size)) || static_cast<i64>(wide_file_path_count) != file_path.size + 1)
 	{
 		return false;
 	}
@@ -142,11 +142,11 @@ procedure bool32 read(char** data, u64* size, String file_path, MemoryArena* are
 		return false;
 	}
 
-	*size = static_cast<u64>(file_size.QuadPart);
+	*size = static_cast<i64>(file_size.QuadPart);
 	*data = allocate<char>(arena, *size);
 
 	DWORD write_amount;
-	if (*size >= (1ULL << 32) || !ReadFile(handle, *data, static_cast<DWORD>(*size), &write_amount, 0) || write_amount != *size)
+	if (*size >= (1LL << 32) || !ReadFile(handle, *data, static_cast<DWORD>(*size), &write_amount, 0) || write_amount != *size)
 	{
 		return false;
 	}
@@ -158,7 +158,7 @@ procedure bool32 write(String file_path, String content)
 {
 	wchar_t wide_file_path[MAX_PATH];
 	u64     wide_file_path_count;
-	if (mbstowcs_s(&wide_file_path_count, wide_file_path, file_path.data, file_path.size) || wide_file_path_count != file_path.size + 1)
+	if (mbstowcs_s(&wide_file_path_count, wide_file_path, file_path.data, static_cast<size_t>(file_path.size)) || static_cast<i64>(wide_file_path_count) != file_path.size + 1)
 	{
 		return false;
 	}
@@ -195,20 +195,20 @@ procedure bool32 write(String file_path, String content)
 	DEFER { CloseHandle(handle); };
 
 	DWORD write_amount;
-	return content.size < (1ull << 32) && WriteFile(handle, content.data, static_cast<DWORD>(content.size), &write_amount, 0) && write_amount == content.size;
+	return content.size < (1LL << 32) && WriteFile(handle, content.data, static_cast<DWORD>(content.size), &write_amount, 0) && write_amount == content.size;
 }
 
 struct StringBuilderCharBufferNode
 {
 	StringBuilderCharBufferNode* next;
-	u64  count;
+	i64  count;
 	char buffer[4096];
 };
 
 struct StringBuilder
 {
 	MemoryArena*                 arena;
-	u64                          size;
+	i64                          size;
 	StringBuilderCharBufferNode  head;
 	StringBuilderCharBufferNode* curr;
 };
@@ -225,10 +225,10 @@ procedure StringBuilder* init_string_builder(MemoryArena* arena)
 
 procedure void append(StringBuilder* builder, String str)
 {
-	u64 index = 0;
+	i64 index = 0;
 	while (index < str.size)
 	{
-		if (builder->curr->count == ARRAY_CAPACITY(builder->curr->buffer))
+		if (builder->curr->count == capacityof(builder->curr->buffer))
 		{
 			if (!builder->curr->next)
 			{
@@ -238,8 +238,8 @@ procedure void append(StringBuilder* builder, String str)
 			*builder->curr = {};
 		}
 
-		u64 write_amount = min(str.size - index, ARRAY_CAPACITY(builder->curr->buffer) - builder->curr->count);
-		memcpy(builder->curr->buffer + builder->curr->count, str.data + index, write_amount);
+		i64 write_amount = min(str.size - index, capacityof(builder->curr->buffer) - builder->curr->count);
+		memcpy(builder->curr->buffer + builder->curr->count, str.data + index, static_cast<size_t>(write_amount));
 		builder->curr->count += write_amount;
 		builder->size        += write_amount;
 		index                += write_amount;
@@ -265,9 +265,9 @@ procedure void append(StringBuilder* builder, StringBuilder* post)
 do\
 {\
 	char APPENDF_BUFFER_[4096];\
-	i32 APPENDF_WRITE_AMOUNT_ = sprintf_s(APPENDF_BUFFER_, ARRAY_CAPACITY(APPENDF_BUFFER_), (FORMAT), __VA_ARGS__);\
-	ASSERT(IN_RANGE(APPENDF_WRITE_AMOUNT_, 0, static_cast<i32>(ARRAY_CAPACITY(APPENDF_BUFFER_))));\
-	append((BUILDER), { static_cast<u64>(APPENDF_WRITE_AMOUNT_), APPENDF_BUFFER_ });\
+	i32 APPENDF_WRITE_AMOUNT_ = sprintf_s(APPENDF_BUFFER_, capacityof(APPENDF_BUFFER_), (FORMAT), __VA_ARGS__);\
+	ASSERT(IN_RANGE(APPENDF_WRITE_AMOUNT_, 0, static_cast<i32>(capacityof(APPENDF_BUFFER_))));\
+	append((BUILDER), { static_cast<i64>(APPENDF_WRITE_AMOUNT_), APPENDF_BUFFER_ });\
 }\
 while (false)
 
@@ -275,12 +275,12 @@ procedure String flush(StringBuilder* builder)
 {
 	char* data = allocate<char>(builder->arena, builder->size);
 
-	u64 write_count = 0;
+	i64 write_count = 0;
 	FOR_NODES(&builder->head)
 	{
 		if (it->count)
 		{
-			memcpy(data + write_count, it->buffer, it->count);
+			memcpy(data + write_count, it->buffer, static_cast<size_t>(it->count));
 			write_count += it->count;
 			it->count    = 0;
 		}
@@ -423,16 +423,16 @@ struct TokenBufferNode
 {
 	TokenBufferNode* next;
 	TokenBufferNode* prev;
-	u64              count;
+	i64              count;
 	Token            buffer[4096];
 };
 
 struct Tokenizer
 {
 	String           file_path;
-	u64              file_size;
+	i64              file_size;
 	char*            file_data;
-	i32              curr_index_in_node;
+	i64              curr_index_in_node;
 	TokenBufferNode* curr_node;
 };
 
@@ -477,9 +477,9 @@ procedure Tokenizer init_tokenizer(String file_path, MemoryArena* arena)
 			};
 
 		lambda inc =
-			[&](u64 offset)
+			[&](i64 offset)
 			{
-				offset = min(offset, static_cast<u64>(tokenizer.file_data + tokenizer.file_size - curr_read));
+				offset = min(offset, static_cast<i64>(tokenizer.file_data + tokenizer.file_size - curr_read));
 				FOR_RANGE(offset)
 				{
 					if (curr_read[0] == '\n')
@@ -640,7 +640,7 @@ procedure Tokenizer init_tokenizer(String file_path, MemoryArena* arena)
 
 		if (token.type != TokenType::null)
 		{
-			if (tokenizer.curr_node->count == ARRAY_CAPACITY(tokenizer.curr_node->buffer))
+			if (tokenizer.curr_node->count == capacityof(tokenizer.curr_node->buffer))
 			{
 				tokenizer.curr_node->next       = allocate<TokenBufferNode>(arena);
 				*tokenizer.curr_node->next      = {};
@@ -680,9 +680,9 @@ procedure Token shift(Tokenizer* tokenizer, i32 offset)
 		{
 			if (tokenizer->curr_node->prev)
 			{
-				ASSERT(tokenizer->curr_node->prev->count == ARRAY_CAPACITY(tokenizer->curr_node->prev->buffer));
+				ASSERT(tokenizer->curr_node->prev->count == capacityof(tokenizer->curr_node->prev->buffer));
 				tokenizer->curr_node          = tokenizer->curr_node->prev;
-				tokenizer->curr_index_in_node = ARRAY_CAPACITY(tokenizer->curr_node->buffer) - 1;
+				tokenizer->curr_index_in_node = capacityof(tokenizer->curr_node->buffer) - 1;
 			}
 			else
 			{
@@ -690,11 +690,11 @@ procedure Token shift(Tokenizer* tokenizer, i32 offset)
 				return {};
 			}
 		}
-		else if (static_cast<u64>(tokenizer->curr_index_in_node) >= tokenizer->curr_node->count)
+		else if (static_cast<i64>(tokenizer->curr_index_in_node) >= tokenizer->curr_node->count)
 		{
 			if (tokenizer->curr_node->next)
 			{
-				ASSERT(tokenizer->curr_node->count == ARRAY_CAPACITY(tokenizer->curr_node->buffer));
+				ASSERT(tokenizer->curr_node->count == capacityof(tokenizer->curr_node->buffer));
 				tokenizer->curr_node          = tokenizer->curr_node->next;
 				tokenizer->curr_index_in_node = 0;
 			}
@@ -738,7 +738,7 @@ procedure void report(String message, Tokenizer* tokenizer)
 			Token next_token = shift(&scan_tokenizer, 1);
 			if (next_token.type == TokenType::null || next_token.line_index != curr_token.line_index)
 			{
-				line.size = static_cast<u64>(curr_token.text.data + curr_token.text.size - line.data);
+				line.size = static_cast<i64>(curr_token.text.data + curr_token.text.size - line.data);
 				break;
 			}
 		}
@@ -1202,7 +1202,7 @@ int main()
 
 	MemoryArena main_arena = {};
 	main_arena.size = MEBIBYTES_OF(1);
-	main_arena.data = reinterpret_cast<byte*>(malloc(main_arena.size));
+	main_arena.data = reinterpret_cast<byte*>(malloc(static_cast<size_t>(main_arena.size)));
 	if (!main_arena.data)
 	{
 		return 1;
